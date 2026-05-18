@@ -1,0 +1,9 @@
+.env
+.kis_token_cache.json
+__pycache__/
+*.pyc
+logs/
+results/
+.DS_Store
+*.png
+*.plist

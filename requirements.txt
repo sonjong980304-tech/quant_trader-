@@ -1,0 +1,15 @@
+yfinance
+pandas
+ta
+vectorbt
+langgraph
+langchain-openai
+langchain-community
+langchain-core
+openai
+tavily-python
+python-dotenv
+requests
+schedule
+matplotlib
+numpy
