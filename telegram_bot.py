@@ -74,12 +74,17 @@ def write_stocks_to_config(stocks: dict):
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     msg = (
         "📈 <b>퀀트 자동매매 봇</b>\n\n"
+        "<b>[자동매매]</b>\n"
         "/status       — 전 종목 신호 조회\n"
         "/balance      — 계좌 잔고 조회\n"
         "/run          — 에이전트 수동 실행\n"
         "/stocks       — 현재 종목 목록\n"
         "/addstock     — 종목 추가\n"
-        "/removestock  — 종목 삭제\n"
+        "/removestock  — 종목 삭제\n\n"
+        "<b>[수동 매매]</b>\n"
+        "/buy 코드 수량   — 수동 매수\n"
+        "/sell 코드 수량  — 수동 매도\n"
+        "/sellall 코드   — 전량 매도\n\n"
         "/help         — 도움말"
     )
     await update.message.reply_text(msg, parse_mode="HTML")
@@ -291,19 +296,181 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     stocks = read_stocks_from_config()
     msg = (
         "<b>📖 도움말</b>\n\n"
+        "<b>[자동매매]</b>\n"
         "/status              — 전 종목 신호 조회\n"
         "/balance             — 계좌 잔고\n"
         "/run                 — 에이전트 즉시 실행\n"
         "/stocks              — 종목 목록 보기\n"
         "/addstock 코드 이름  — 종목 추가\n"
-        "  예) /addstock 005930 삼성전자\n"
-        "  예) /addstock 432720.KQ 퀄리타스반도체\n"
-        "/removestock 코드    — 종목 삭제\n"
-        "  예) /removestock 005930\n\n"
+        "/removestock 코드    — 종목 삭제\n\n"
+        "<b>[수동 매매]</b>\n"
+        "/buy 코드 수량       — 수동 매수\n"
+        "  예) /buy 010140 10\n"
+        "/sell 코드 수량      — 수동 매도\n"
+        "  예) /sell 010140 5\n"
+        "/sellall 코드        — 전량 매도\n"
+        "  예) /sellall 010140\n\n"
         f"현재 전략: MA{ACTIVE_STRATEGY['short_window']}/{ACTIVE_STRATEGY['long_window']} + RSI≥{ACTIVE_STRATEGY['rsi_buy_threshold']}\n"
         f"현재 종목 수: {len(stocks)}개"
     )
     await update.message.reply_text(msg, parse_mode="HTML")
+
+
+# ─────────────────────────────────────────────
+# /buy — 수동 매수
+# 사용법: /buy 010140 10
+# ─────────────────────────────────────────────
+async def cmd_buy(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    args = ctx.args
+    if len(args) < 2:
+        await update.message.reply_text(
+            "사용법: /buy <종목코드> <수량>\n"
+            "예) /buy 010140 10\n"
+            "(종목코드는 6자리 숫자, .KS/.KQ 제외)"
+        )
+        return
+
+    code = args[0].upper().replace(".KS", "").replace(".KQ", "")
+    try:
+        qty = int(args[1])
+        if qty <= 0:
+            raise ValueError
+    except ValueError:
+        await update.message.reply_text("⚠️ 수량은 1 이상의 정수여야 합니다.")
+        return
+
+    await update.message.reply_text(f"⏳ {code} {qty}주 시장가 매수 주문 중...")
+
+    try:
+        from trader import KISTrader
+        t = KISTrader()
+
+        # 현재가 조회
+        price_info = t.get_current_price(code)
+        price      = price_info["price"]
+        total      = price * qty
+
+        # 주문 가능 금액 확인
+        cash = t.get_available_cash()
+        if cash < total:
+            await update.message.reply_text(
+                f"⚠️ 주문 가능 금액 부족\n"
+                f"필요: {total:,}원 | 가능: {cash:,}원"
+            )
+            return
+
+        result = t.buy(code, qty)
+        await update.message.reply_text(
+            f"✅ <b>매수 주문 완료</b>\n"
+            f"종목: {code}\n"
+            f"수량: {qty}주\n"
+            f"현재가: {price:,}원\n"
+            f"예상 금액: {total:,}원",
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ 매수 주문 실패: {e}")
+
+
+# ─────────────────────────────────────────────
+# /sell — 수동 매도
+# 사용법: /sell 010140 5
+# ─────────────────────────────────────────────
+async def cmd_sell(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    args = ctx.args
+    if len(args) < 2:
+        await update.message.reply_text(
+            "사용법: /sell <종목코드> <수량>\n"
+            "예) /sell 010140 5"
+        )
+        return
+
+    code = args[0].upper().replace(".KS", "").replace(".KQ", "")
+    try:
+        qty = int(args[1])
+        if qty <= 0:
+            raise ValueError
+    except ValueError:
+        await update.message.reply_text("⚠️ 수량은 1 이상의 정수여야 합니다.")
+        return
+
+    await update.message.reply_text(f"⏳ {code} {qty}주 시장가 매도 주문 중...")
+
+    try:
+        from trader import KISTrader
+        t = KISTrader()
+
+        # 보유 수량 확인
+        balance = t.get_balance()
+        holding = next((b for b in balance if b["stock_code"] == code), None)
+        if not holding:
+            await update.message.reply_text(f"⚠️ {code} 보유 종목이 없습니다.")
+            return
+        if holding["qty"] < qty:
+            await update.message.reply_text(
+                f"⚠️ 보유 수량 부족\n"
+                f"요청: {qty}주 | 보유: {holding['qty']}주"
+            )
+            return
+
+        price_info = t.get_current_price(code)
+        price      = price_info["price"]
+
+        t.sell(code, qty)
+        await update.message.reply_text(
+            f"✅ <b>매도 주문 완료</b>\n"
+            f"종목: {code}\n"
+            f"수량: {qty}주\n"
+            f"현재가: {price:,}원\n"
+            f"예상 금액: {price * qty:,}원",
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ 매도 주문 실패: {e}")
+
+
+# ─────────────────────────────────────────────
+# /sellall — 전량 매도
+# 사용법: /sellall 010140
+# ─────────────────────────────────────────────
+async def cmd_sellall(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    args = ctx.args
+    if not args:
+        await update.message.reply_text(
+            "사용법: /sellall <종목코드>\n"
+            "예) /sellall 010140\n"
+            "보유한 수량 전체를 시장가 매도합니다."
+        )
+        return
+
+    code = args[0].upper().replace(".KS", "").replace(".KQ", "")
+    await update.message.reply_text(f"⏳ {code} 전량 매도 주문 중...")
+
+    try:
+        from trader import KISTrader
+        t = KISTrader()
+
+        balance = t.get_balance()
+        holding = next((b for b in balance if b["stock_code"] == code), None)
+        if not holding or holding["qty"] == 0:
+            await update.message.reply_text(f"⚠️ {code} 보유 종목이 없습니다.")
+            return
+
+        qty        = holding["qty"]
+        price_info = t.get_current_price(code)
+        price      = price_info["price"]
+
+        t.sell(code, qty)
+        await update.message.reply_text(
+            f"✅ <b>전량 매도 주문 완료</b>\n"
+            f"종목: {code} ({holding['name']})\n"
+            f"수량: {qty}주 (전량)\n"
+            f"현재가: {price:,}원\n"
+            f"예상 금액: {price * qty:,}원",
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ 전량 매도 실패: {e}")
 
 
 # ─────────────────────────────────────────────
@@ -322,6 +489,9 @@ def main():
     app.add_handler(CommandHandler("stocks",       cmd_stocks))
     app.add_handler(CommandHandler("addstock",     cmd_addstock))
     app.add_handler(CommandHandler("removestock",  cmd_removestock))
+    app.add_handler(CommandHandler("buy",          cmd_buy))
+    app.add_handler(CommandHandler("sell",         cmd_sell))
+    app.add_handler(CommandHandler("sellall",      cmd_sellall))
     app.add_handler(CommandHandler("help",         cmd_help))
 
     logger.info("텔레그램 봇 시작 (polling...)")
