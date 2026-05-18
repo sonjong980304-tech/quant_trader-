@@ -1,0 +1,268 @@
+"""
+trader.py - 한국투자증권 KIS API 연동
+OAuth 토큰 발급, 주문, 잔고 조회 등 실제 매매 기능
+"""
+
+import os
+import json
+import time
+import logging
+import requests
+from datetime import datetime, timedelta
+from config import KIS_APP_KEY, KIS_APP_SECRET, KIS_ACCOUNT_NO, KIS_BASE_URL, IS_MOCK
+
+logger = logging.getLogger(__name__)
+
+# 토큰 캐시 파일 경로
+TOKEN_CACHE_FILE = ".kis_token_cache.json"
+
+
+class KISTrader:
+    """한국투자증권 REST API 클라이언트"""
+
+    def __init__(self):
+        self.base_url    = KIS_BASE_URL
+        self.app_key     = KIS_APP_KEY
+        self.app_secret  = KIS_APP_SECRET
+        self.account_no  = KIS_ACCOUNT_NO
+        # 계좌번호 파싱: "12345678-01" → cano=12345678, prdt=01 / "3579" → cano=3579, prdt=""
+        if "-" in KIS_ACCOUNT_NO:
+            parts = KIS_ACCOUNT_NO.split("-")
+            self.cano     = parts[0]
+            self.acnt_prdt = parts[1]
+        else:
+            self.cano     = KIS_ACCOUNT_NO
+            self.acnt_prdt = ""
+        self.access_token = None
+        self.token_expire = None
+        self._load_token_cache()
+
+    # ─────────────────────────────────────────────
+    # 토큰 관리
+    # ─────────────────────────────────────────────
+
+    def _load_token_cache(self):
+        """저장된 토큰 캐시를 불러와 유효하면 재사용"""
+        if not os.path.exists(TOKEN_CACHE_FILE):
+            return
+        try:
+            with open(TOKEN_CACHE_FILE) as f:
+                cache = json.load(f)
+            expire = datetime.fromisoformat(cache["expire"])
+            if datetime.now() < expire - timedelta(minutes=10):
+                self.access_token = cache["token"]
+                self.token_expire = expire
+                logger.info("기존 토큰 재사용 (만료: %s)", expire)
+        except Exception as e:
+            logger.warning("토큰 캐시 로드 실패: %s", e)
+
+    def _save_token_cache(self):
+        """발급된 토큰을 파일에 캐시"""
+        try:
+            with open(TOKEN_CACHE_FILE, "w") as f:
+                json.dump({
+                    "token":  self.access_token,
+                    "expire": self.token_expire.isoformat(),
+                }, f)
+        except Exception as e:
+            logger.warning("토큰 캐시 저장 실패: %s", e)
+
+    def get_access_token(self) -> str:
+        """
+        OAuth 2.0 토큰 발급.
+        유효한 토큰이 있으면 재사용, 없으면 새로 발급.
+        """
+        if self.access_token and self.token_expire and datetime.now() < self.token_expire - timedelta(minutes=10):
+            return self.access_token
+
+        url  = f"{self.base_url}/oauth2/tokenP"
+        body = {
+            "grant_type": "client_credentials",
+            "appkey":     self.app_key,
+            "appsecret":  self.app_secret,
+        }
+
+        resp = requests.post(url, json=body, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+
+        self.access_token = data["access_token"]
+        # 만료 시간: 응답의 expires_in(초) 또는 기본 24시간
+        expires_in = int(data.get("expires_in", 86400))
+        self.token_expire = datetime.now() + timedelta(seconds=expires_in)
+
+        self._save_token_cache()
+        logger.info("신규 토큰 발급 완료 (만료: %s)", self.token_expire)
+        return self.access_token
+
+    def _headers(self, tr_id: str) -> dict:
+        """공통 요청 헤더 생성"""
+        return {
+            "Content-Type":  "application/json; charset=utf-8",
+            "authorization": f"Bearer {self.get_access_token()}",
+            "appkey":        self.app_key,
+            "appsecret":     self.app_secret,
+            "tr_id":         tr_id,
+            "custtype":      "P",  # 개인
+        }
+
+    # ─────────────────────────────────────────────
+    # 시세 조회
+    # ─────────────────────────────────────────────
+
+    def get_current_price(self, stock_code: str) -> dict:
+        """
+        주식 현재가 조회.
+        stock_code: 6자리 종목코드 (예: "005930")
+        반환: {"price": int, "change_rate": float, ...}
+        """
+        url = f"{self.base_url}/uapi/domestic-stock/v1/quotations/inquire-price"
+        headers = self._headers("FHKST01010100")
+        params  = {
+            "FID_COND_MRKT_DIV_CODE": "J",
+            "FID_INPUT_ISCD":         stock_code,
+        }
+
+        resp = requests.get(url, headers=headers, params=params, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+
+        if data.get("rt_cd") != "0":
+            raise ValueError(f"현재가 조회 실패: {data.get('msg1')}")
+
+        output = data["output"]
+        return {
+            "stock_code":  stock_code,
+            "price":       int(output["stck_prpr"]),          # 현재가
+            "change":      int(output["prdy_vrss"]),          # 전일 대비
+            "change_rate": float(output["prdy_ctrt"]),        # 등락률 (%)
+            "volume":      int(output["acml_vol"]),           # 누적 거래량
+        }
+
+    # ─────────────────────────────────────────────
+    # 주문
+    # ─────────────────────────────────────────────
+
+    def _place_order(self, stock_code: str, qty: int, order_type: str) -> dict:
+        """
+        시장가 주문 내부 처리.
+        order_type: "BUY" 또는 "SELL"
+        모의: VTTC0802U(매수) / VTTC0801U(매도)
+        실투: TTTC0802U(매수) / TTTC0801U(매도)
+        """
+        if IS_MOCK:
+            tr_id = "VTTC0802U" if order_type == "BUY" else "VTTC0801U"
+        else:
+            tr_id = "TTTC0802U" if order_type == "BUY" else "TTTC0801U"
+
+        url  = f"{self.base_url}/uapi/domestic-stock/v1/trading/order-cash"
+        body = {
+            "CANO":       self.cano,  # 계좌번호 앞 8자리
+            "ACNT_PRDT_CD": self.acnt_prdt,  # 계좌 상품코드
+            "PDNO":       stock_code,
+            "ORD_DVSN":   "01",   # 01: 시장가
+            "ORD_QTY":    str(qty),
+            "ORD_UNPR":   "0",    # 시장가는 0
+        }
+
+        resp = requests.post(url, headers=self._headers(tr_id), json=body, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+
+        if data.get("rt_cd") != "0":
+            raise ValueError(f"주문 실패: {data.get('msg1')}")
+
+        logger.info("%s 주문 완료: %s %d주", order_type, stock_code, qty)
+        return data["output"]
+
+    def buy(self, stock_code: str, qty: int) -> dict:
+        """시장가 매수 주문"""
+        return self._place_order(stock_code, qty, "BUY")
+
+    def sell(self, stock_code: str, qty: int) -> dict:
+        """시장가 매도 주문"""
+        return self._place_order(stock_code, qty, "SELL")
+
+    # ─────────────────────────────────────────────
+    # 잔고 조회
+    # ─────────────────────────────────────────────
+
+    def get_balance(self) -> list:
+        """
+        주식 잔고 조회.
+        반환: [{"stock_code": str, "name": str, "qty": int, "avg_price": int, "eval_profit": int}, ...]
+        """
+        url = f"{self.base_url}/uapi/domestic-stock/v1/trading/inquire-balance"
+        tr_id = "VTTC8434R" if IS_MOCK else "TTTC8434R"
+
+        params = {
+            "CANO":            self.cano,
+            "ACNT_PRDT_CD":    self.acnt_prdt,
+            "AFHR_FLPR_YN":    "N",
+            "OFL_YN":          "",
+            "INQR_DVSN":       "02",
+            "UNPR_DVSN":       "01",
+            "FUND_STTL_ICLD_YN": "N",
+            "FNCG_AMT_AUTO_RDPT_YN": "N",
+            "PRCS_DVSN":       "01",
+            "CTX_AREA_FK100":  "",
+            "CTX_AREA_NK100":  "",
+        }
+
+        resp = requests.get(url, headers=self._headers(tr_id), params=params, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+
+        if data.get("rt_cd") != "0":
+            raise ValueError(f"잔고 조회 실패: {data.get('msg1')}")
+
+        holdings = []
+        for item in data.get("output1", []):
+            qty = int(item.get("hldg_qty", 0))
+            if qty > 0:
+                holdings.append({
+                    "stock_code":  item["pdno"],
+                    "name":        item["prdt_name"],
+                    "qty":         qty,
+                    "avg_price":   int(item.get("pchs_avg_pric", 0)),
+                    "eval_profit": int(item.get("evlu_pfls_amt", 0)),
+                })
+        return holdings
+
+    def get_available_cash(self) -> int:
+        """주문 가능 현금 조회 (원)"""
+        url = f"{self.base_url}/uapi/domestic-stock/v1/trading/inquire-psbl-order"
+        tr_id = "VTTC8908R" if IS_MOCK else "TTTC8908R"
+
+        params = {
+            "CANO":            self.cano,
+            "ACNT_PRDT_CD":    self.acnt_prdt,
+            "PDNO":            "005930",  # 조회용 임시 종목
+            "ORD_UNPR":        "0",
+            "ORD_DVSN":        "01",
+            "CMA_EVLU_AMT_ICLD_YN": "Y",
+            "OVRS_ICLD_YN":    "N",
+        }
+
+        resp = requests.get(url, headers=self._headers(tr_id), params=params, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+
+        if data.get("rt_cd") != "0":
+            raise ValueError(f"주문 가능 금액 조회 실패: {data.get('msg1')}")
+
+        return int(data["output"].get("ord_psbl_cash", 0))
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    trader = KISTrader()
+    print(f"[모의투자: {IS_MOCK}] BASE URL: {KIS_BASE_URL}")
+    if KIS_APP_KEY:
+        try:
+            token = trader.get_access_token()
+            print(f"토큰 발급 성공: {token[:20]}...")
+        except Exception as e:
+            print(f"토큰 발급 실패: {e}")
+    else:
+        print("KIS_APP_KEY가 설정되지 않았습니다. .env 파일을 확인하세요.")
