@@ -1,16 +1,18 @@
 """
 telegram_bot.py - 텔레그램 봇 명령어 처리
-폰에서 명령어로 신호·잔고 조회 및 에이전트 수동 실행
 
 사용 가능한 명령어:
-  /start   - 봇 소개
-  /status  - 전 종목 현재 신호 조회
-  /balance - 계좌 잔고 조회
-  /run     - 에이전트 수동 실행
-  /help    - 도움말
+  /start        - 봇 소개
+  /status       - 전 종목 현재 신호 조회
+  /balance      - 계좌 잔고 조회
+  /run          - 에이전트 수동 실행
+  /addstock     - 종목 추가 예) /addstock 005930 삼성전자
+  /removestock  - 종목 삭제 예) /removestock 005930
+  /stocks       - 현재 종목 목록
+  /help         - 도움말
 """
 
-import asyncio
+import re
 import subprocess
 import logging
 from telegram import Update
@@ -27,6 +29,44 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+CONFIG_PATH = "/Users/gyuyeong/quant_trader/config.py"
+
+
+# ─────────────────────────────────────────────
+# config.py STOCKS 딕셔너리 읽기/쓰기 헬퍼
+# ─────────────────────────────────────────────
+def read_stocks_from_config() -> dict:
+    """config.py에서 현재 STOCKS 딕셔너리를 읽어 반환"""
+    import importlib, sys
+    # 모듈 캐시 초기화 후 재로드
+    if "config" in sys.modules:
+        del sys.modules["config"]
+    import config as cfg
+    return dict(cfg.STOCKS)
+
+
+def write_stocks_to_config(stocks: dict):
+    """config.py의 STOCKS 블록을 새 딕셔너리로 교체"""
+    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    lines = ['STOCKS = {\n']
+    for ticker, name in stocks.items():
+        lines.append(f'    "{ticker}": "{name}",\n')
+    lines.append('}\n')
+    new_block = "".join(lines)
+
+    # STOCKS = { ... } 블록 통째로 교체
+    content = re.sub(
+        r'STOCKS\s*=\s*\{[^}]*\}',
+        new_block.rstrip('\n'),
+        content,
+        flags=re.DOTALL,
+    )
+
+    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+        f.write(content)
+
 
 # ─────────────────────────────────────────────
 # /start
@@ -34,11 +74,13 @@ logger = logging.getLogger(__name__)
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     msg = (
         "📈 <b>퀀트 자동매매 봇</b>\n\n"
-        "사용 가능한 명령어:\n"
-        "/status  — 전 종목 신호 조회\n"
-        "/balance — 계좌 잔고 조회\n"
-        "/run     — 에이전트 수동 실행\n"
-        "/help    — 도움말"
+        "/status       — 전 종목 신호 조회\n"
+        "/balance      — 계좌 잔고 조회\n"
+        "/run          — 에이전트 수동 실행\n"
+        "/stocks       — 현재 종목 목록\n"
+        "/addstock     — 종목 추가\n"
+        "/removestock  — 종목 삭제\n"
+        "/help         — 도움말"
     )
     await update.message.reply_text(msg, parse_mode="HTML")
 
@@ -48,32 +90,27 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 # ─────────────────────────────────────────────
 async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("⏳ 신호 조회 중...")
-
+    stocks = read_stocks_from_config()
     s = ACTIVE_STRATEGY
     lines = [f"<b>📊 종목별 신호 ({s['name']})</b>\n"]
 
-    for ticker, name in STOCKS.items():
+    for ticker, name in stocks.items():
         try:
             df = fetch_ohlcv(ticker, period_years=1)
             df = add_all_indicators(df, short=s["short_window"], long=s["long_window"], rsi_period=s["rsi_period"])
             df = detect_crossover(df, short=s["short_window"], long=s["long_window"])
             df = generate_signals(df, strategy=s)
             sig = get_latest_signal(df)
-
             price = df["Close"].iloc[-1]
 
             if sig["buy"]:
-                icon = "🟢"
-                signal_txt = "매수"
+                icon, signal_txt = "🟢", "매수"
             elif sig["sell_full"]:
-                icon = "🔴"
-                signal_txt = "전량매도"
+                icon, signal_txt = "🔴", "전량매도"
             elif sig["sell_partial"]:
-                icon = "🟡"
-                signal_txt = "분할매도"
+                icon, signal_txt = "🟡", "분할매도"
             else:
-                icon = "⚪"
-                signal_txt = "없음"
+                icon, signal_txt = "⚪", "없음"
 
             lines.append(
                 f"{icon} <b>{name}</b>\n"
@@ -82,7 +119,7 @@ async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 f"   신호: {signal_txt}\n"
             )
         except Exception as e:
-            lines.append(f"⚠️ <b>{name}</b>: 조회 실패 ({e})\n")
+            lines.append(f"⚠️ <b>{name}</b>: 조회 실패\n")
 
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
@@ -92,22 +129,15 @@ async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 # ─────────────────────────────────────────────
 async def cmd_balance(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("⏳ 잔고 조회 중...")
-
     try:
         from trader import KISTrader
-        from config import KIS_APP_KEY, IS_MOCK
-        if not KIS_APP_KEY:
-            await update.message.reply_text("⚠️ KIS_APP_KEY가 설정되지 않았습니다.")
-            return
-
+        from config import IS_MOCK
         t = KISTrader()
         balance = t.get_balance()
         cash    = t.get_available_cash()
         mode    = "모의투자" if IS_MOCK else "실전투자"
 
-        lines = [f"<b>💰 계좌 잔고 ({mode})</b>\n"]
-        lines.append(f"주문 가능 현금: <b>{cash:,}원</b>\n")
-
+        lines = [f"<b>💰 계좌 잔고 ({mode})</b>\n", f"주문 가능 현금: <b>{cash:,}원</b>\n"]
         if balance:
             lines.append("─────────────────")
             for h in balance:
@@ -119,7 +149,6 @@ async def cmd_balance(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             lines.append("보유 종목 없음")
 
         await update.message.reply_text("\n".join(lines), parse_mode="HTML")
-
     except Exception as e:
         await update.message.reply_text(f"⚠️ 잔고 조회 실패: {e}")
 
@@ -129,19 +158,16 @@ async def cmd_balance(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 # ─────────────────────────────────────────────
 async def cmd_run(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🤖 에이전트 실행 시작...")
-
     try:
         result = subprocess.run(
             ["python3", "graph.py"],
             cwd="/Users/gyuyeong/quant_trader",
-            capture_output=True,
-            text=True,
-            timeout=120,
+            capture_output=True, text=True, timeout=120,
         )
         if result.returncode == 0:
-            await update.message.reply_text("✅ 에이전트 실행 완료!\n결과는 위 메시지를 확인하세요.")
+            await update.message.reply_text("✅ 에이전트 실행 완료!\n신호가 있으면 위에 메시지가 왔을 거예요.")
         else:
-            await update.message.reply_text(f"⚠️ 오류 발생:\n{result.stderr[-300:]}")
+            await update.message.reply_text(f"⚠️ 오류:\n{result.stderr[-300:]}")
     except subprocess.TimeoutExpired:
         await update.message.reply_text("⏱️ 실행 시간 초과 (120초)")
     except Exception as e:
@@ -149,17 +175,133 @@ async def cmd_run(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 # ─────────────────────────────────────────────
+# /stocks — 현재 종목 목록
+# ─────────────────────────────────────────────
+async def cmd_stocks(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    stocks = read_stocks_from_config()
+    lines = ["<b>📋 현재 매매 종목 목록</b>\n"]
+    for ticker, name in stocks.items():
+        lines.append(f"• {name} ({ticker})")
+    lines.append(f"\n총 {len(stocks)}개 종목")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+
+# ─────────────────────────────────────────────
+# /addstock — 종목 추가
+# 사용법: /addstock 005930 삼성전자
+# KS/KQ 자동 판별 (KOSDAQ은 .KQ, 나머지 .KS)
+# ─────────────────────────────────────────────
+async def cmd_addstock(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    args = ctx.args
+    if len(args) < 2:
+        await update.message.reply_text(
+            "사용법: /addstock <종목코드> <종목명>\n"
+            "예) /addstock 005930 삼성전자\n"
+            "KOSDAQ은 자동 감지하며, 직접 지정도 가능:\n"
+            "예) /addstock 432720.KQ 퀄리타스반도체"
+        )
+        return
+
+    code = args[0].upper()
+    name = " ".join(args[1:])
+
+    # 티커 형식 결정
+    if "." in code:
+        ticker = code  # .KS/.KQ 직접 지정
+    else:
+        # 6자리 코드 기준으로 시장 자동 판별
+        # KOSDAQ 종목은 일반적으로 코드가 0으로 시작하지 않거나 특정 범위
+        # yfinance로 .KS 먼저 시도, 실패하면 .KQ
+        import yfinance as yf
+        df_ks = yf.download(f"{code}.KS", period="5d", progress=False, auto_adjust=True)
+        if not df_ks.empty:
+            ticker = f"{code}.KS"
+        else:
+            df_kq = yf.download(f"{code}.KQ", period="5d", progress=False, auto_adjust=True)
+            if not df_kq.empty:
+                ticker = f"{code}.KQ"
+            else:
+                await update.message.reply_text(
+                    f"⚠️ 종목코드 <b>{code}</b>로 데이터를 찾을 수 없습니다.\n"
+                    f"코드를 다시 확인하거나 시장을 직접 지정해보세요:\n"
+                    f"/addstock {code}.KQ {name}",
+                    parse_mode="HTML"
+                )
+                return
+
+    stocks = read_stocks_from_config()
+    if ticker in stocks:
+        await update.message.reply_text(f"⚠️ <b>{name}</b>({ticker})은 이미 목록에 있습니다.", parse_mode="HTML")
+        return
+
+    stocks[ticker] = name
+    write_stocks_to_config(stocks)
+    await update.message.reply_text(
+        f"✅ <b>{name}</b> ({ticker}) 추가 완료!\n현재 {len(stocks)}개 종목",
+        parse_mode="HTML"
+    )
+
+
+# ─────────────────────────────────────────────
+# /removestock — 종목 삭제
+# 사용법: /removestock 005930
+# ─────────────────────────────────────────────
+async def cmd_removestock(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    args = ctx.args
+    if not args:
+        await update.message.reply_text(
+            "사용법: /removestock <종목코드>\n"
+            "예) /removestock 005930\n"
+            "현재 목록 확인: /stocks"
+        )
+        return
+
+    code = args[0].upper()
+    stocks = read_stocks_from_config()
+
+    # .KS/.KQ 없이 입력한 경우 자동 탐색
+    matched_ticker = None
+    if code in stocks:
+        matched_ticker = code
+    else:
+        for t in stocks:
+            if t.startswith(code):
+                matched_ticker = t
+                break
+
+    if not matched_ticker:
+        await update.message.reply_text(
+            f"⚠️ <b>{code}</b>를 종목 목록에서 찾을 수 없습니다.\n/stocks 로 목록을 확인하세요.",
+            parse_mode="HTML"
+        )
+        return
+
+    removed_name = stocks.pop(matched_ticker)
+    write_stocks_to_config(stocks)
+    await update.message.reply_text(
+        f"🗑️ <b>{removed_name}</b> ({matched_ticker}) 삭제 완료!\n남은 종목: {len(stocks)}개",
+        parse_mode="HTML"
+    )
+
+
+# ─────────────────────────────────────────────
 # /help
 # ─────────────────────────────────────────────
 async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    stocks = read_stocks_from_config()
     msg = (
         "<b>📖 도움말</b>\n\n"
-        "/status  — 전 종목의 현재 MA·RSI·신호 조회\n"
-        "/balance — KIS 계좌 잔고 및 주문 가능 금액\n"
-        "/run     — 에이전트 즉시 실행 (신호감지→AI→주문)\n"
-        "/help    — 이 도움말\n\n"
-        f"전략: MA{ACTIVE_STRATEGY['short_window']}/{ACTIVE_STRATEGY['long_window']} 골든크로스 + RSI≥{ACTIVE_STRATEGY['rsi_buy_threshold']}\n"
-        f"종목: {', '.join(STOCKS.values())}"
+        "/status              — 전 종목 신호 조회\n"
+        "/balance             — 계좌 잔고\n"
+        "/run                 — 에이전트 즉시 실행\n"
+        "/stocks              — 종목 목록 보기\n"
+        "/addstock 코드 이름  — 종목 추가\n"
+        "  예) /addstock 005930 삼성전자\n"
+        "  예) /addstock 432720.KQ 퀄리타스반도체\n"
+        "/removestock 코드    — 종목 삭제\n"
+        "  예) /removestock 005930\n\n"
+        f"현재 전략: MA{ACTIVE_STRATEGY['short_window']}/{ACTIVE_STRATEGY['long_window']} + RSI≥{ACTIVE_STRATEGY['rsi_buy_threshold']}\n"
+        f"현재 종목 수: {len(stocks)}개"
     )
     await update.message.reply_text(msg, parse_mode="HTML")
 
@@ -173,11 +315,14 @@ def main():
         return
 
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start",   cmd_start))
-    app.add_handler(CommandHandler("status",  cmd_status))
-    app.add_handler(CommandHandler("balance", cmd_balance))
-    app.add_handler(CommandHandler("run",     cmd_run))
-    app.add_handler(CommandHandler("help",    cmd_help))
+    app.add_handler(CommandHandler("start",        cmd_start))
+    app.add_handler(CommandHandler("status",       cmd_status))
+    app.add_handler(CommandHandler("balance",      cmd_balance))
+    app.add_handler(CommandHandler("run",          cmd_run))
+    app.add_handler(CommandHandler("stocks",       cmd_stocks))
+    app.add_handler(CommandHandler("addstock",     cmd_addstock))
+    app.add_handler(CommandHandler("removestock",  cmd_removestock))
+    app.add_handler(CommandHandler("help",         cmd_help))
 
     logger.info("텔레그램 봇 시작 (polling...)")
     app.run_polling()
