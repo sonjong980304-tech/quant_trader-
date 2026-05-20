@@ -9,7 +9,11 @@ import time
 import logging
 import requests
 from datetime import datetime, timedelta
-from config import KIS_APP_KEY, KIS_APP_SECRET, KIS_ACCOUNT_NO, KIS_BASE_URL, IS_MOCK
+from config import (
+    KIS_APP_KEY, KIS_APP_SECRET, KIS_ACCOUNT_NO, KIS_BASE_URL, IS_MOCK,
+    STOP_LOSS_HARD, STOP_LOSS_WARN, TRAILING_STOP_RATIO, MA_STOP_ENABLED,
+    TAKE_PROFIT_HALF, TAKE_PROFIT_FULL, ORDER_RATIO,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -252,6 +256,192 @@ class KISTrader:
             raise ValueError(f"주문 가능 금액 조회 실패: {data.get('msg1')}")
 
         return int(data["output"].get("ord_psbl_cash", 0))
+
+
+# ─────────────────────────────────────────────
+# 포지션 관리 (단일 딕셔너리, 함수를 통해서만 접근)
+# ─────────────────────────────────────────────
+
+positions: dict = {}
+# {
+#   "티커": {
+#       "avg_price":     매수 평균가,
+#       "highest_price": 장중 고점 (매 루프마다 갱신),
+#       "quantity":      보유 수량,
+#       "half_sold":     1차 익절(50%) 완료 여부,
+#   }
+# }
+
+_trader_instance: "KISTrader | None" = None
+
+
+def _get_trader() -> "KISTrader":
+    """KISTrader 싱글턴 반환"""
+    global _trader_instance
+    if _trader_instance is None:
+        _trader_instance = KISTrader()
+    return _trader_instance
+
+
+def register_position(ticker: str, avg_price: float, quantity: int) -> None:
+    """포지션 등록 (신규 매수 완료 후 호출)"""
+    positions[ticker] = {
+        "avg_price":     avg_price,
+        "highest_price": avg_price,
+        "quantity":      quantity,
+        "half_sold":     False,
+    }
+
+
+def clear_position(ticker: str) -> None:
+    """포지션 초기화 (매도 완료 후 호출)"""
+    positions.pop(ticker, None)
+
+
+def update_highest_price(ticker: str, current_price: float) -> None:
+    """
+    현재가가 기존 고점보다 높으면 고점 갱신.
+    runner.py 루프에서 손절 체크 전에 반드시 먼저 호출.
+    """
+    if ticker in positions:
+        if current_price > positions[ticker]["highest_price"]:
+            positions[ticker]["highest_price"] = current_price
+
+
+def check_stop_loss(ticker: str, current_price: float, ma5: float) -> tuple:
+    """
+    3단계 손절 판단. 우선순위 순서대로 체크.
+
+    반환값: (손절타입: str | None, 사유: str | None)
+      - ("STOP_LOSS",    "매수가 -5% 손절")      ← 1순위: 절대 하방 방어
+      - ("TRAILING_STOP","고점 대비 -8% 손절")   ← 2순위: 수익 보호
+      - ("MA_STOP",      "5일선 이탈 손절")      ← 3순위: 추세 이탈
+      - (None, None)                             ← 손절 조건 없음
+    """
+    if ticker not in positions:
+        return None, None
+
+    avg_price = positions[ticker]["avg_price"]
+    highest   = positions[ticker]["highest_price"]
+
+    # 1순위: 매수가 기준 -5%
+    if current_price < avg_price * (1 + STOP_LOSS_HARD):
+        return "STOP_LOSS", f"매수가({avg_price:,.0f}) 대비 {STOP_LOSS_HARD:.0%} 손절"
+
+    # 2순위: 고점 기준 트레일링 스탑 -8%
+    if current_price < highest * (1 + TRAILING_STOP_RATIO):
+        return "TRAILING_STOP", f"고점({highest:,.0f}) 대비 {TRAILING_STOP_RATIO:.0%} 손절"
+
+    # 3순위: 5일선 이탈 (MA_STOP_ENABLED=True 일 때만)
+    if MA_STOP_ENABLED and current_price < ma5:
+        return "MA_STOP", f"5일선({ma5:,.0f}) 이탈 손절"
+
+    return None, None
+
+
+def check_stop_loss_warning(ticker: str, current_price: float) -> bool:
+    """
+    매수가 대비 STOP_LOSS_WARN(-3%) 도달 시 경고 알림용.
+    실제 손절 주문은 실행하지 않음.
+    """
+    if ticker not in positions:
+        return False
+    avg_price = positions[ticker]["avg_price"]
+    return current_price <= avg_price * (1 + STOP_LOSS_WARN)
+
+
+def check_take_profit(ticker: str, current_price: float) -> "str | None":
+    """
+    2단계 익절 판단.
+
+    반환값:
+      - "half" : +8% 도달, 보유량 50% 매도 (half_sold=False 일 때만)
+      - "full" : +15% 도달, 잔량 전량 매도
+      - None   : 익절 조건 없음
+    """
+    if ticker not in positions:
+        return None
+
+    avg_price  = positions[ticker]["avg_price"]
+    half_sold  = positions[ticker]["half_sold"]
+    gain_ratio = (current_price - avg_price) / avg_price
+
+    if gain_ratio >= TAKE_PROFIT_FULL:
+        return "full"
+    if gain_ratio >= TAKE_PROFIT_HALF and not half_sold:
+        return "half"
+    return None
+
+
+def calc_position_size(ticker: str, available_cash: float, current_price: float) -> int:
+    """
+    1종목당 매수 가능 수량 계산.
+    - 이미 보유 중인 종목은 추가 매수 금지 (0 반환)
+    - 가용 현금의 ORDER_RATIO(40%) 한도로 매수
+    - 40% 금액으로 1주도 못 살 경우 1주 매수
+    반환값: 매수 가능 수량 (주)
+    """
+    if ticker in positions or current_price <= 0:
+        return 0
+    budget = available_cash * ORDER_RATIO
+    if budget >= current_price:
+        return int(budget / current_price)
+    return 1
+
+
+# ─────────────────────────────────────────────
+# 주문 실행 헬퍼 (KISTrader 래핑)
+# ─────────────────────────────────────────────
+
+def execute_buy(stock_code: str, qty: int) -> "dict | None":
+    """시장가 매수 실행"""
+    if not KIS_APP_KEY:
+        logger.info("[시뮬레이션] 매수: %s %d주", stock_code, qty)
+        return {"simulated": True}
+    try:
+        return _get_trader().buy(stock_code, qty)
+    except Exception as e:
+        logger.error("매수 실행 실패 [%s %d주]: %s", stock_code, qty, e)
+        return None
+
+
+def execute_sell_all(ticker: str) -> "dict | None":
+    """보유 전량 시장가 매도 실행"""
+    stock_code = ticker.replace(".KS", "").replace(".KQ", "")
+    if not KIS_APP_KEY:
+        logger.info("[시뮬레이션] 전량 매도: %s", stock_code)
+        return {"simulated": True}
+    try:
+        t       = _get_trader()
+        balance = t.get_balance()
+        holding = next((b for b in balance if b["stock_code"] == stock_code), None)
+        if holding and holding["qty"] > 0:
+            return t.sell(stock_code, holding["qty"])
+        logger.warning("전량 매도 실패: %s 보유 수량 없음", stock_code)
+        return None
+    except Exception as e:
+        logger.error("전량 매도 실패 [%s]: %s", stock_code, e)
+        return None
+
+
+def execute_sell_half(ticker: str) -> "dict | None":
+    """보유량 50% 시장가 매도 실행"""
+    stock_code = ticker.replace(".KS", "").replace(".KQ", "")
+    if not KIS_APP_KEY:
+        logger.info("[시뮬레이션] 50%% 매도: %s", stock_code)
+        return {"simulated": True}
+    try:
+        t       = _get_trader()
+        balance = t.get_balance()
+        holding = next((b for b in balance if b["stock_code"] == stock_code), None)
+        if holding and holding["qty"] > 0:
+            qty = max(1, holding["qty"] // 2)
+            return t.sell(stock_code, qty)
+        logger.warning("분할 매도 실패: %s 보유 수량 없음", stock_code)
+        return None
+    except Exception as e:
+        logger.error("분할 매도 실패 [%s]: %s", stock_code, e)
+        return None
 
 
 if __name__ == "__main__":
