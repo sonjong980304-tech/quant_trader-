@@ -11,7 +11,6 @@ import requests
 from datetime import datetime, timedelta
 from config import (
     KIS_APP_KEY, KIS_APP_SECRET, KIS_ACCOUNT_NO, KIS_BASE_URL, IS_MOCK,
-    STOP_LOSS_HARD, STOP_LOSS_WARN, TRAILING_STOP_RATIO, MA_STOP_ENABLED,
     TAKE_PROFIT_HALF, TAKE_PROFIT_FULL, ORDER_RATIO,
 )
 
@@ -286,10 +285,9 @@ def _get_trader() -> "KISTrader":
 def register_position(ticker: str, avg_price: float, quantity: int) -> None:
     """포지션 등록 (신규 매수 완료 후 호출)"""
     positions[ticker] = {
-        "avg_price":     avg_price,
-        "highest_price": avg_price,
-        "quantity":      quantity,
-        "half_sold":     False,
+        "avg_price": avg_price,
+        "quantity":  quantity,
+        "half_sold": False,
     }
 
 
@@ -298,56 +296,6 @@ def clear_position(ticker: str) -> None:
     positions.pop(ticker, None)
 
 
-def update_highest_price(ticker: str, current_price: float) -> None:
-    """
-    현재가가 기존 고점보다 높으면 고점 갱신.
-    runner.py 루프에서 손절 체크 전에 반드시 먼저 호출.
-    """
-    if ticker in positions:
-        if current_price > positions[ticker]["highest_price"]:
-            positions[ticker]["highest_price"] = current_price
-
-
-def check_stop_loss(ticker: str, current_price: float, ma5: float) -> tuple:
-    """
-    3단계 손절 판단. 우선순위 순서대로 체크.
-
-    반환값: (손절타입: str | None, 사유: str | None)
-      - ("STOP_LOSS",    "매수가 -5% 손절")      ← 1순위: 절대 하방 방어
-      - ("TRAILING_STOP","고점 대비 -8% 손절")   ← 2순위: 수익 보호
-      - ("MA_STOP",      "5일선 이탈 손절")      ← 3순위: 추세 이탈
-      - (None, None)                             ← 손절 조건 없음
-    """
-    if ticker not in positions:
-        return None, None
-
-    avg_price = positions[ticker]["avg_price"]
-    highest   = positions[ticker]["highest_price"]
-
-    # 1순위: 매수가 기준 -5%
-    if current_price < avg_price * (1 + STOP_LOSS_HARD):
-        return "STOP_LOSS", f"매수가({avg_price:,.0f}) 대비 {STOP_LOSS_HARD:.0%} 손절"
-
-    # 2순위: 고점 기준 트레일링 스탑 -8%
-    if current_price < highest * (1 + TRAILING_STOP_RATIO):
-        return "TRAILING_STOP", f"고점({highest:,.0f}) 대비 {TRAILING_STOP_RATIO:.0%} 손절"
-
-    # 3순위: 5일선 이탈 (MA_STOP_ENABLED=True 일 때만)
-    if MA_STOP_ENABLED and current_price < ma5:
-        return "MA_STOP", f"5일선({ma5:,.0f}) 이탈 손절"
-
-    return None, None
-
-
-def check_stop_loss_warning(ticker: str, current_price: float) -> bool:
-    """
-    매수가 대비 STOP_LOSS_WARN(-3%) 도달 시 경고 알림용.
-    실제 손절 주문은 실행하지 않음.
-    """
-    if ticker not in positions:
-        return False
-    avg_price = positions[ticker]["avg_price"]
-    return current_price <= avg_price * (1 + STOP_LOSS_WARN)
 
 
 def check_take_profit(ticker: str, current_price: float) -> "str | None":

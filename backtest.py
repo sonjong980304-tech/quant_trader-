@@ -18,7 +18,6 @@ from strategy import generate_signals
 from config import (
     STOCKS, MA_SHORT, MA_LONG, RSI_PERIOD,
     BACKTEST_PERIOD_YEARS, BACKTEST_INIT_CASH,
-    TRAILING_STOP_RATIO,
 )
 
 warnings.filterwarnings("ignore")
@@ -58,8 +57,6 @@ def run_backtest(ticker: str, stock_name: str, eval_days: int = None) -> dict:
         exits,
         init_cash=BACKTEST_INIT_CASH,
         freq="D",
-        sl_stop=abs(TRAILING_STOP_RATIO),
-        sl_trail=True,
     )
 
     total_return = pf.total_return()

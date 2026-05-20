@@ -23,13 +23,12 @@ from indicators import add_all_indicators, detect_crossover
 from strategy import generate_signals, get_latest_signal, buy_signal_1_intraday
 from trader import (
     positions, KISTrader,
-    update_highest_price, check_stop_loss, check_stop_loss_warning,
     check_take_profit, calc_position_size,
     register_position, clear_position,
     execute_buy, execute_sell_all, execute_sell_half,
 )
 from notifier import (
-    send_stop_loss_alert, send_stop_loss_warning, send_take_profit_alert,
+    send_take_profit_alert,
     build_buy_message, build_sell_full_message, build_sell_partial_message,
     send_telegram,
 )
@@ -130,26 +129,7 @@ def run_priority_loop():
             logger.error("  현재가 조회 실패: %s", e)
             continue
 
-        # ① 고점 갱신 (매 루프 최우선)
-        update_highest_price(ticker, current_price)
-
-        # ② 손절 경고 (주문 없이 알림만)
-        if check_stop_loss_warning(ticker, current_price):
-            avg_price  = positions[ticker]["avg_price"]
-            loss_ratio = (current_price - avg_price) / avg_price
-            send_stop_loss_warning(stock_name, current_price, loss_ratio)
-            logger.warning("  손절 경고: %.1f%%", loss_ratio * 100)
-
-        # ③ 손절 체크 (즉시 실행, LangGraph 우회)
-        stop_type, reason = check_stop_loss(ticker, current_price, ma5)
-        if stop_type:
-            logger.warning("  손절 실행: %s | %s", stop_type, reason)
-            execute_sell_all(ticker)
-            send_stop_loss_alert(stock_name, current_price, stop_type, reason)
-            clear_position(ticker)
-            continue
-
-        # ④ 익절 체크 (즉시 실행)
+        # ① 익절 체크 (즉시 실행)
         profit_type = check_take_profit(ticker, current_price)
         if profit_type == "half":
             logger.info("  1차 익절 (50%%) 실행: %s", ticker)
