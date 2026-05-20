@@ -119,15 +119,13 @@ def _ma20_rising_series(df: pd.DataFrame) -> pd.Series:
 
 def buy_signal_1(df: pd.DataFrame) -> pd.Series:
     """
-    매수 1원칙: 5일선 위 단기 돌파 + MA20 우상향 필터
-    - MA20 우상향
+    매수 1원칙: 5일선 위 단기 돌파
     - 전일 종가 > MA5 (5일선 위에 있는 상태)
     - 당일 시가 < MA5 (5일선 아래로 하락 출발)
     - 당일 종가 > MA5 + 양봉 (5일선 위로 재돌파)
     """
     ma5 = f"MA_{MA_SHORT}"
     return (
-        _ma20_rising_series(df) &
         (df["Close"].shift(1) > df[ma5].shift(1)) &
         (df["Open"] < df[ma5]) &
         _is_bullish(df) &
@@ -137,8 +135,7 @@ def buy_signal_1(df: pd.DataFrame) -> pd.Series:
 
 def buy_signal_2(df: pd.DataFrame) -> pd.Series:
     """
-    매수 2원칙: 5~20일선 사이 반등 + MA20 우상향 필터
-    - MA20 우상향
+    매수 2원칙: 5~20일선 사이 반등
     - 종가가 MA5와 MA20 사이
     - 오늘 거래량 증가 + 양봉
     """
@@ -150,18 +147,16 @@ def buy_signal_2(df: pd.DataFrame) -> pd.Series:
     between_mas    = (df["Close"] > ma_min) & (df["Close"] < ma_max)
     today_reversal = _vol_increase(df) & _is_bullish(df)
 
-    return _ma20_rising_series(df) & between_mas & today_reversal
+    return between_mas & today_reversal
 
 
 def buy_signal_3(df: pd.DataFrame) -> pd.Series:
     """
-    매수 3원칙: 거래량 급증 반등 + MA20 우상향 필터
-    - MA20 우상향
+    매수 3원칙: 거래량 급증 반등
     - 거래량 급증
     - 양봉 또는 도지형 캔들
     """
     return (
-        _ma20_rising_series(df) &
         _vol_surge(df) &
         (_is_bullish(df) | _is_doji(df))
     )
@@ -213,19 +208,13 @@ def buy_signal_1_intraday(ticker: str, minute_df: pd.DataFrame, daily_df: pd.Dat
     분봉 기반 매수 1원칙 (runner.py 장중 실행 전용).
 
     조건:
-      1. MA20 우상향 필터 (일봉 기준)
-      2. 현재가 > 5일 이동평균선 (일봉 기준)
-      3. 9:00~9:30 사이 저가가 5일선 아래로 내려간 적 있을 것
-      4. 현재가가 장 시작 시가(9:00 첫 캔들 open)를 상향 돌파
-      5. 돌파 캔들 거래량 > 직전 5분봉 평균거래량 × VOLUME_INCREASE_RATIO
+      1. 현재가 > 5일 이동평균선 (일봉 기준)
+      2. 9:00~9:30 사이 저가가 5일선 아래로 내려간 적 있을 것
+      3. 현재가가 장 시작 시가(9:00 첫 캔들 open)를 상향 돌파
+      4. 돌파 캔들 거래량 > 직전 5분봉 평균거래량 × VOLUME_INCREASE_RATIO
     """
-    from indicators import is_ma20_rising
 
     if minute_df.empty or daily_df.empty:
-        return False
-
-    # 1. MA20 우상향 필터
-    if not is_ma20_rising(daily_df):
         return False
 
     ma5_col   = f"MA_{MA_SHORT}"
