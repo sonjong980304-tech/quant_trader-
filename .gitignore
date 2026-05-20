@@ -7,3 +7,4 @@ results/
 .DS_Store
 *.png
 *.plist
+stocks.py
