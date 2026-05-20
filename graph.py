@@ -1,13 +1,13 @@
 """
 graph.py - LangGraph 기반 퀀트 자동매매 에이전트
-노드 순서: 데이터수집 → 지표계산 → 신호감지 → 리스크체크 → 알림전송 → 로그저장
+노드 순서: 데이터수집 → 지표계산 → 신호감지 → 알림전송 → 로그저장
 """
 
 import os
 import json
 import logging
 import logging.handlers
-from datetime import date, datetime
+from datetime import datetime
 from typing import TypedDict, List, Dict, Any, Literal
 
 from langgraph.graph import StateGraph, END
@@ -22,12 +22,11 @@ from notifier import (
     build_buy_message,
     build_sell_full_message,
     build_sell_partial_message,
-    build_warning_message,
 )
 from trader import KISTrader
 from config import (
     STOCKS, MA_SHORT, MA_LONG, RSI_PERIOD, OPENAI_API_KEY,
-    LOG_FILE, MAX_CONSECUTIVE_BUY, ORDER_AMOUNT,
+    LOG_FILE, ORDER_AMOUNT,
 )
 
 # ─────────────────────────────────────────────
@@ -46,23 +45,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger("quant_trader")
 
-# 당일 처리된 신호 추적 (중복 방지)
-_today_signals: Dict[str, List[str]] = {}
-_consecutive_buy_count: Dict[str, int] = {}
-
 
 # ─────────────────────────────────────────────
 # 그래프 상태 타입 정의
 # ─────────────────────────────────────────────
 class TraderState(TypedDict):
-    ticker:       str                  # 현재 처리 중인 종목 코드
-    stock_name:   str                  # 종목명 (한글)
-    ohlcv:        Any                  # OHLCV DataFrame
-    signal:       Dict[str, Any]       # 최신 신호 딕셔너리
-    signal_type:  str                  # "buy" / "sell_full" / "sell_partial" / "none"
-    risk_warning: str                  # 리스크 경고 메시지
-    log_entries:  List[str]            # 로그 항목 목록
-    error:        str                  # 오류 메시지
+    ticker:      str                  # 현재 처리 중인 종목 코드
+    stock_name:  str                  # 종목명 (한글)
+    ohlcv:       Any                  # OHLCV DataFrame
+    signal:      Dict[str, Any]       # 최신 신호 딕셔너리
+    signal_type: str                  # "buy" / "sell_full" / "sell_partial" / "none"
+    log_entries: List[str]            # 로그 항목 목록
+    error:       str                  # 오류 메시지
 
 
 # ─────────────────────────────────────────────
@@ -136,60 +130,19 @@ def node_detect_signal(state: TraderState) -> TraderState:
     return state
 
 
-def route_after_signal(state: TraderState) -> Literal["risk", "end"]:
+def route_after_signal(state: TraderState) -> Literal["notify", "end"]:
     if state.get("error") or state.get("signal_type") == "none":
-        return "end"
-    return "risk"
-
-
-# ─────────────────────────────────────────────
-# 노드 4: 리스크 체크
-# ─────────────────────────────────────────────
-def node_risk_check(state: TraderState) -> TraderState:
-    logger.info("[노드4] 리스크 체크: %s", state["ticker"])
-    today  = str(date.today())
-    ticker = state["ticker"]
-    state["risk_warning"] = ""
-
-    daily_key    = f"{ticker}_{today}"
-    prev_signals = _today_signals.get(daily_key, [])
-
-    if state["signal_type"] in prev_signals:
-        logger.warning("  → 당일 중복 신호 감지 — 주문 건너뜀")
-        state["signal_type"] = "none"
-        return state
-
-    if state["signal_type"] == "buy":
-        _consecutive_buy_count[ticker] = _consecutive_buy_count.get(ticker, 0) + 1
-        if _consecutive_buy_count[ticker] >= MAX_CONSECUTIVE_BUY:
-            warning = f"연속 {_consecutive_buy_count[ticker]}회 매수 신호 — 과열 주의"
-            state["risk_warning"] = warning
-            logger.warning("  → %s", warning)
-    else:
-        _consecutive_buy_count[ticker] = 0
-
-    _today_signals.setdefault(daily_key, []).append(state["signal_type"])
-    logger.info("  → 리스크 체크 통과")
-    return state
-
-
-def route_after_risk(state: TraderState) -> Literal["notify", "end"]:
-    if state.get("signal_type") == "none":
         return "end"
     return "notify"
 
 
 # ─────────────────────────────────────────────
-# 노드 5: 알림 전송 + 주문 실행
+# 노드 4: 알림 전송 + 주문 실행
 # ─────────────────────────────────────────────
 def node_send_notification(state: TraderState) -> TraderState:
-    logger.info("[노드5] 알림 전송: %s", state["stock_name"])
+    logger.info("[노드4] 알림 전송: %s", state["stock_name"])
     signal     = state["signal"]
     stock_name = state["stock_name"]
-
-    if state.get("risk_warning"):
-        warn_msg = build_warning_message(stock_name, _consecutive_buy_count.get(state["ticker"], 0))
-        send_telegram(warn_msg)
 
     if state["signal_type"] == "buy":
         msg = build_buy_message(stock_name, signal)
@@ -230,17 +183,16 @@ def node_send_notification(state: TraderState) -> TraderState:
 
 
 # ─────────────────────────────────────────────
-# 노드 6: 로그 저장
+# 노드 5: 로그 저장
 # ─────────────────────────────────────────────
 def node_save_log(state: TraderState) -> TraderState:
-    logger.info("[노드6] 로그 저장: %s", state["stock_name"])
+    logger.info("[노드5] 로그 저장: %s", state["stock_name"])
     log_entry = {
-        "timestamp":    datetime.now().isoformat(),
-        "ticker":       state["ticker"],
-        "stock_name":   state["stock_name"],
-        "signal_type":  state["signal_type"],
-        "signal":       state["signal"],
-        "risk_warning": state.get("risk_warning", ""),
+        "timestamp":   datetime.now().isoformat(),
+        "ticker":      state["ticker"],
+        "stock_name":  state["stock_name"],
+        "signal_type": state["signal_type"],
+        "signal":      state["signal"],
     }
     logger.info("=== 매매 로그 ===\n%s", json.dumps(log_entry, ensure_ascii=False, indent=2))
     return state
@@ -255,22 +207,16 @@ def build_graph() -> StateGraph:
     graph.add_node("fetch_data",        node_fetch_data)
     graph.add_node("calc_indicators",   node_calc_indicators)
     graph.add_node("detect_signal",     node_detect_signal)
-    graph.add_node("risk_check",        node_risk_check)
     graph.add_node("send_notification", node_send_notification)
     graph.add_node("save_log",          node_save_log)
 
     graph.set_entry_point("fetch_data")
-    graph.add_edge("fetch_data",    "calc_indicators")
+    graph.add_edge("fetch_data",      "calc_indicators")
     graph.add_edge("calc_indicators", "detect_signal")
 
     graph.add_conditional_edges(
         "detect_signal",
         route_after_signal,
-        {"risk": "risk_check", "end": END},
-    )
-    graph.add_conditional_edges(
-        "risk_check",
-        route_after_risk,
         {"notify": "send_notification", "end": END},
     )
     graph.add_edge("send_notification", "save_log")
@@ -289,14 +235,13 @@ def run_all_stocks():
         logger.info("\n>>> [%s] %s 처리 시작", ticker, stock_name)
 
         initial_state: TraderState = {
-            "ticker":       ticker,
-            "stock_name":   stock_name,
-            "ohlcv":        None,
-            "signal":       {},
-            "signal_type":  "none",
-            "risk_warning": "",
-            "log_entries":  [],
-            "error":        "",
+            "ticker":      ticker,
+            "stock_name":  stock_name,
+            "ohlcv":       None,
+            "signal":      {},
+            "signal_type": "none",
+            "log_entries": [],
+            "error":       "",
         }
 
         try:
