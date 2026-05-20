@@ -60,7 +60,7 @@ def run_backtest(ticker: str, stock_name: str, eval_days: int = None) -> dict:
     )
 
     total_return = pf.total_return()
-    years        = BACKTEST_PERIOD_YEARS
+    years        = eval_days / 252 if eval_days else BACKTEST_PERIOD_YEARS
     cagr         = (1 + total_return) ** (1 / years) - 1
     mdd          = pf.max_drawdown()
     sharpe       = pf.sharpe_ratio()

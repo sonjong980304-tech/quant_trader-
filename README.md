@@ -42,23 +42,11 @@
 
 ---
 
-## 매매 대상 종목 (13종목)
+## 분봉 거래량 급증 알림
 
-| 종목명 | 티커 |
-|--------|------|
-| 삼성중공업 | 010140.KS |
-| 대우건설 | 047040.KS |
-| 퀄리타스반도체 | 432720.KQ |
-| 삼성E&A | 028050.KS |
-| 코오롱인더 | 120110.KS |
-| KODEX 증권 ETF | 117700.KS |
-| LG전자 | 066570.KS |
-| 두산로보틱스 | 454910.KS |
-| 현대모비스 | 012330.KS |
-| 두산에너빌리티 | 034020.KS |
-| KODEX AI전력핵심설비 | 487240.KS |
-| 이수페타시스 | 007660.KS |
-| 하나금융지주 | 086790.KS |
+장중 분봉 거래량이 직전 5분봉 평균 대비 **5배 이상** 급증하면,  
+해당 종목의 네이버 최신 뉴스 3건을 자동으로 텔레그램으로 전송합니다.  
+동일 종목은 30분 이내 중복 알림을 차단합니다.
 
 ---
 
@@ -71,6 +59,7 @@
          [ runner.py — 장중 매매 루프 ]          [ graph.py — LangGraph 에이전트 ]
                     │                                         │
          분봉 기반 실시간 매매                        일봉 기반 1회 실행
+         거래량 급증 시 뉴스 알림
 ```
 
 ---
@@ -92,21 +81,15 @@
 │           │                                                     │
 │        신호 없음? ──────────────────────────────► END           │
 │           │ 신호 있음                                           │
-│  [노드4] 뉴스 수집                                               │
-│    └─ Tavily API — 종목 관련 최신 뉴스 3건                       │
-│           │                                                     │
-│  [노드5] AI 판단                                                 │
-│    └─ GPT-4o — 기술 신호 + 뉴스 센티먼트 종합 분석               │
-│           │                                                     │
-│        AI 보류? ────────────────────────────────► END           │
-│           │ 매수 or 매도                                        │
-│  [노드6] 리스크 체크                                             │
+│  [노드4] 리스크 체크                                             │
 │    └─ 당일 중복 신호 필터 / 연속 매수 과열 경고                   │
 │           │                                                     │
-│  [노드7] 알림 전송 + 주문 실행                                   │
+│        중복/차단? ──────────────────────────────► END           │
+│           │ 통과                                                │
+│  [노드5] 알림 전송 + 주문 실행                                   │
 │    └─ 텔레그램 알림 → KIS API 시장가 주문                        │
 │           │                                                     │
-│  [노드8] 로그 저장                                               │
+│  [노드6] 로그 저장                                               │
 │    └─ logs/trader.log (JSON 포맷, 5MB 롤링)                     │
 │           │                                                     │
 │          END                                                    │
@@ -122,11 +105,7 @@ TraderState {
     ohlcv         # OHLCV DataFrame (노드1~3에서 갱신)
     signal        # 최신 신호 딕셔너리 (close, MA5, MA20, RSI, volume...)
     signal_type   # "buy" / "sell_full" / "sell_partial" / "none"
-    news          # 뉴스 헤드라인 목록 (노드4)
-    news_summary  # "긍정적" / "부정적" / "중립적" (노드5)
-    ai_decision   # "매수" / "매도" / "보류" (노드5)
-    ai_reason     # AI 판단 근거 텍스트
-    risk_warning  # 과열 경고 메시지 (노드6)
+    risk_warning  # 과열 경고 메시지 (노드4)
     error         # 예외 메시지
 }
 ```
@@ -137,14 +116,16 @@ TraderState {
 
 ```
 quant_trader/
-├── config.py          # 전략 파라미터 / 종목 목록 / API 설정
+├── config.py          # 전략 파라미터 / API 설정
+├── stocks.py          # 매매 종목 목록 (로컬 전용 — .gitignore)
 ├── data_fetcher.py    # yfinance OHLCV 수집
-├── indicators.py      # MA / RSI / 거래량 시간 보정 / MA20 방향 판단
+├── indicators.py      # MA / RSI / 거래량 시간 보정
 ├── strategy.py        # 매수 1~3원칙 / 매도 1~2원칙 신호 생성
-├── graph.py           # LangGraph 8노드 에이전트
+├── news_fetcher.py    # 네이버 뉴스 수집
+├── graph.py           # LangGraph 6노드 에이전트
 ├── runner.py          # 장중 분봉 기반 실시간 매매 루프
 ├── trader.py          # KIS API 주문 / 잔고 / 포지션 관리
-├── backtest.py        # vectorbt 백테스트 (트레일링 스탑 포함)
+├── backtest.py        # vectorbt 백테스트
 ├── dashboard.py       # Streamlit 모니터링 대시보드
 ├── notifier.py        # 텔레그램 알림 메시지 빌더
 ├── telegram_bot.py    # 텔레그램 봇 명령 처리
@@ -172,6 +153,7 @@ bash install.sh
 - Python 패키지 설치 (`requirements.txt`)
 - `.env` 파일 생성 및 API 키 입력 안내
 - macOS launchd 자동실행 등록 (매일 09:00)
+- `stocks.py` 템플릿 생성 (종목 목록 직접 입력)
 
 ### 수동 설치
 
@@ -179,6 +161,10 @@ bash install.sh
 pip install -r requirements.txt
 cp .env.example .env
 # .env 파일에 API 키 입력
+
+# 종목 목록 설정 (stocks.py는 .gitignore에 포함)
+cp stocks.py.example stocks.py
+# stocks.py에서 STOCKS 딕셔너리에 종목 추가
 ```
 
 ---
@@ -193,7 +179,8 @@ KIS_MOCK=true          # 모의투자: true / 실투자: false
 TELEGRAM_BOT_TOKEN=...
 TELEGRAM_CHAT_ID=...
 OPENAI_API_KEY=...
-TAVILY_API_KEY=...
+NAVER_CLIENT_ID=...
+NAVER_CLIENT_SECRET=...
 ```
 
 ### 발급 방법
@@ -201,7 +188,7 @@ TAVILY_API_KEY=...
 - **KIS API**: [한국투자증권 KIS Developers](https://apiportal.koreainvestment.com) → 앱 신청
 - **텔레그램 봇**: `@BotFather` → `/newbot` → Chat ID는 `getUpdates` API로 확인
 - **OpenAI**: [platform.openai.com](https://platform.openai.com) → API Keys
-- **Tavily**: [tavily.com](https://tavily.com) → 대시보드
+- **네이버 뉴스 API**: [developers.naver.com](https://developers.naver.com) → 애플리케이션 등록 → 검색 API
 
 ---
 
@@ -246,7 +233,7 @@ KIS_MOCK=false
 
 ## 주의사항
 
-1. `.env` 파일은 절대 GitHub에 커밋하지 마세요.
+1. `.env` 파일과 `stocks.py`는 절대 GitHub에 커밋하지 마세요.
 2. API 키 없이 실행 시 자동으로 시뮬레이션 모드로 동작합니다.
 3. 알고리즘 트레이딩은 예상치 못한 손실이 발생할 수 있습니다.
 
