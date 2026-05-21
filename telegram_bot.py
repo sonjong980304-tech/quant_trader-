@@ -16,9 +16,10 @@ import re
 import subprocess
 import logging
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
 from config import TELEGRAM_BOT_TOKEN, STOCKS, MA_SHORT, MA_LONG, RSI_PERIOD
+from gpt_agent import ask as gpt_ask, clear_history as gpt_clear
 from data_fetcher import fetch_ohlcv
 from indicators import add_all_indicators, detect_crossover
 from strategy import generate_signals, get_latest_signal
@@ -74,18 +75,12 @@ def write_stocks_to_config(stocks: dict):
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     msg = (
         "📈 <b>퀀트 자동매매 봇</b>\n\n"
-        "<b>[자동매매]</b>\n"
-        "/status       — 전 종목 신호 조회\n"
-        "/balance      — 계좌 잔고 조회\n"
-        "/run          — 에이전트 수동 실행\n"
-        "/stocks       — 현재 종목 목록\n"
-        "/addstock     — 종목 추가\n"
-        "/removestock  — 종목 삭제\n\n"
-        "<b>[수동 매매]</b>\n"
-        "/buy 코드 수량   — 수동 매수\n"
-        "/sell 코드 수량  — 수동 매도\n"
-        "/sellall 코드   — 전량 매도\n\n"
-        "/help         — 도움말"
+        "안녕하세요! 주식 관련 질문은 <b>그냥 말씀해주시면</b> 바로 답변드립니다 😊\n\n"
+        "예) <i>\"삼성전자 PER 얼마야?\"</i>\n"
+        "예) <i>\"매수 2원칙 조건이 뭐야?\"</i>\n"
+        "예) <i>\"지금 내 포지션 뭐 있어?\"</i>\n\n"
+        "재무정보(PER, 영업이익 등)는 Naver 증권에서 자동 검색해 답변합니다.\n\n"
+        "자동매매 기능이 필요할 땐 /help 를 입력하세요."
     )
     await update.message.reply_text(msg, parse_mode="HTML")
 
@@ -110,30 +105,39 @@ async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     for ticker, name in stocks.items():
         try:
-            df = fetch_ohlcv(ticker, period_years=1)
-            df = add_all_indicators(df, short=MA_SHORT, long=MA_LONG, rsi_period=RSI_PERIOD)
-            df = detect_crossover(df, short=MA_SHORT, long=MA_LONG)
-            df = generate_signals(df)
-            sig = get_latest_signal(df)
+            from data_fetcher import get_minute_data
+            from runner import _append_today_bar
 
-            # 실시간 현재가: KIS API 우선, 없으면 일봉 종가(전일 종가)
+            raw_df    = fetch_ohlcv(ticker, period_years=1)
             stock_code = ticker.replace(".KS", "").replace(".KQ", "")
+
+            # 실시간 현재가 + 분봉 데이터로 오늘 바 구성
+            price     = float(raw_df["Close"].iloc[-1])
+            minute_df = None
             if trader:
                 try:
                     price_info = trader.get_current_price(stock_code)
-                    price = float(price_info["price"])
+                    price      = float(price_info["price"])
                 except Exception:
-                    price = float(df["Close"].iloc[-1])
-            else:
-                price = float(df["Close"].iloc[-1])
+                    pass
+                try:
+                    minute_df = get_minute_data(ticker, interval_min=1)
+                except Exception:
+                    pass
+
+            df  = _append_today_bar(raw_df, minute_df)
+            df  = add_all_indicators(df, short=MA_SHORT, long=MA_LONG, rsi_period=RSI_PERIOD)
+            df  = detect_crossover(df, short=MA_SHORT, long=MA_LONG)
+            df  = generate_signals(df)
+            sig = get_latest_signal(df)
 
             if sig["buy"]:
                 principles = "/".join(sig.get("buy_which", []))
                 icon, signal_txt = "🟢", f"매수({principles})"
             elif sig["sell_full"]:
-                icon, signal_txt = "🔴", "매도(1원칙)"
+                icon, signal_txt = "🔴", "매도(2원칙-전량)"
             elif sig["sell_partial"]:
-                icon, signal_txt = "🟡", "매도(2원칙)"
+                icon, signal_txt = "🟡", "매도(1원칙-부분)"
             else:
                 icon, signal_txt = "⚪", "없음"
 
@@ -312,6 +316,48 @@ async def cmd_removestock(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 # ─────────────────────────────────────────────
+# GPT 어시스턴트
+# ─────────────────────────────────────────────
+async def _gpt_reply(update: Update, text: str):
+    """GPT에게 질문하고 답변을 텔레그램으로 전송 (공통 처리)."""
+    if not text.strip():
+        await update.message.reply_text("질문 내용을 입력해주세요.")
+        return
+
+    await update.message.reply_text("🤔 생각 중...")
+    user_id = update.effective_user.id
+
+    try:
+        answer = gpt_ask(user_id, text.strip())
+        # 텔레그램 메시지 최대 4096자 제한
+        if len(answer) > 4000:
+            for i in range(0, len(answer), 4000):
+                await update.message.reply_text(answer[i:i + 4000])
+        else:
+            await update.message.reply_text(answer)
+    except Exception as e:
+        logger.error("GPT 핸들러 오류: %s", e)
+        await update.message.reply_text(f"⚠️ 오류: {e}")
+
+
+async def cmd_ask(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """/ask <질문> — 명시적 GPT 질문."""
+    question = " ".join(ctx.args) if ctx.args else ""
+    await _gpt_reply(update, question)
+
+
+async def cmd_reset(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """/reset — 대화 기록 초기화."""
+    gpt_clear(update.effective_user.id)
+    await update.message.reply_text("🗑️ 대화 기록을 초기화했습니다.")
+
+
+async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """일반 텍스트 메시지 → GPT로 전달."""
+    await _gpt_reply(update, update.message.text or "")
+
+
+# ─────────────────────────────────────────────
 # /help
 # ─────────────────────────────────────────────
 async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -332,6 +378,12 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "  예) /sell 010140 5\n"
         "/sellall 코드        — 전량 매도\n"
         "  예) /sellall 010140\n\n"
+        "<b>[AI 어시스턴트]</b>\n"
+        "메시지 전송          — GPT 자동 답변\n"
+        "/ask 질문            — 명시적 GPT 질문\n"
+        "/reset               — 대화 기록 초기화\n\n"
+        "💡 재무 관련 질문(PER, 영업이익 등)은\n"
+        "   Naver 증권에서 자동 검색해서 답변합니다.\n\n"
         f"현재 전략: MA{MA_SHORT}/MA{MA_LONG} + 거래량/캔들 전략\n"
         f"현재 종목 수: {len(stocks)}개"
     )
@@ -515,6 +567,10 @@ def main():
     app.add_handler(CommandHandler("sell",         cmd_sell))
     app.add_handler(CommandHandler("sellall",      cmd_sellall))
     app.add_handler(CommandHandler("help",         cmd_help))
+    app.add_handler(CommandHandler("ask",          cmd_ask))
+    app.add_handler(CommandHandler("reset",        cmd_reset))
+    # 커맨드가 아닌 일반 텍스트 → GPT (CommandHandler보다 나중에 등록해야 함)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     logger.info("텔레그램 봇 시작 (polling...)")
     app.run_polling()
