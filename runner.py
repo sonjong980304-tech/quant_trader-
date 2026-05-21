@@ -30,7 +30,7 @@ from trader import (
 from notifier import (
     send_take_profit_alert,
     build_buy_message, build_sell_full_message, build_sell_partial_message,
-    send_telegram, build_volume_surge_message,
+    send_telegram, build_volume_surge_message, build_daily_summary_message,
 )
 from news_fetcher import fetch_naver_news
 
@@ -93,6 +93,32 @@ def _check_volume_surge(ticker: str, stock_name: str, minute_df, current_price: 
     news_items = fetch_naver_news(stock_name, n=3)
     msg = build_volume_surge_message(stock_name, current_price, surge_ratio, news_items)
     send_telegram(msg)
+
+
+def send_daily_summary():
+    """오후 3시 종목별 일일 기술적 분석 리포트를 텔레그램으로 전송."""
+    now = datetime.now(KST)
+    if now.weekday() >= 5:
+        return
+
+    logger.info("일일 기술적 분석 리포트 전송 시작")
+    send_telegram(f"📊 <b>일일 기술적 분석 리포트</b>\n{now.strftime('%Y-%m-%d %H:%M')} 기준")
+
+    for ticker, stock_name in STOCKS.items():
+        try:
+            daily_df = fetch_ohlcv(ticker, period_years=1)
+            daily_df = add_all_indicators(daily_df, short=MA_SHORT, long=MA_LONG, rsi_period=RSI_PERIOD)
+            daily_df = detect_crossover(daily_df, short=MA_SHORT, long=MA_LONG)
+            daily_df = generate_signals(daily_df)
+            sig      = get_latest_signal(daily_df)
+            msg      = build_daily_summary_message(
+                stock_name, sig, daily_df, position=positions.get(ticker)
+            )
+            send_telegram(msg)
+        except Exception as e:
+            logger.error("  일일 리포트 실패 (%s): %s", stock_name, e)
+
+    logger.info("일일 기술적 분석 리포트 전송 완료")
 
 
 def run_priority_loop():
@@ -245,6 +271,9 @@ def main():
     for t in times:
         schedule.every().day.at(t).do(run_priority_loop)
         logger.info("  등록: %s", t)
+
+    schedule.every().day.at("15:00").do(send_daily_summary)
+    logger.info("  등록: 15:00 (일일 기술적 분석 리포트)")
 
     logger.info("총 %d개 시간대 등록 완료", len(times))
 
