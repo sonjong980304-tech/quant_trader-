@@ -59,6 +59,69 @@ _TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "set_conditional_order",
+            "description": (
+                "조건부 주문을 등록합니다. 특정 가격 조건이나 수익률 조건 충족 시 자동으로 매수/매도가 실행됩니다. "
+                "'7만원 아래로 떨어지면 사줘', '+10% 되면 팔아줘', '-5% 되면 손절해줘' 같은 요청에 사용하세요."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "stock_name": {"type": "string", "description": "종목명 (예: '삼성전자')"},
+                    "condition_type": {
+                        "type": "string",
+                        "enum": ["price_below", "price_above", "profit_above", "profit_below"],
+                        "description": (
+                            "price_below: 현재가 < 기준가 / price_above: 현재가 > 기준가 / "
+                            "profit_above: 수익률 > X% (익절) / profit_below: 수익률 < X% (손절)"
+                        ),
+                    },
+                    "condition_value": {
+                        "type": "number",
+                        "description": "기준값. 가격 조건이면 원 단위, 수익률 조건이면 % 숫자 (예: 10 → +10%)",
+                    },
+                    "action": {
+                        "type": "string",
+                        "enum": ["buy", "sell", "sellall"],
+                        "description": "buy: 매수 / sell: 일부 매도 / sellall: 전량 매도",
+                    },
+                    "quantity": {
+                        "type": "integer",
+                        "description": "주문 수량. sellall이면 0",
+                    },
+                },
+                "required": ["stock_name", "condition_type", "condition_value", "action", "quantity"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_conditional_orders",
+            "description": "등록된 조건부 주문 목록을 조회합니다. '조건부 주문 뭐 걸어놨어?' 같은 질문에 사용하세요.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "cancel_conditional_order",
+            "description": "조건부 주문을 취소합니다. 주문 ID를 지정하거나 '전부 취소'로 모두 삭제할 수 있습니다.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "order_id": {
+                        "type": "string",
+                        "description": "취소할 주문 ID (list_conditional_orders에서 확인). 전체 취소면 'all'",
+                    }
+                },
+                "required": ["order_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "propose_trade",
             "description": (
                 "사용자가 명시적으로 매수/매도 주문을 요청할 때 호출합니다. "
@@ -320,7 +383,20 @@ def ask(user_id: int, question: str) -> str:
             for tc in msg.tool_calls:
                 args = json.loads(tc.function.arguments)
                 identifier = args.get("identifier", "")
-                if tc.function.name == "propose_trade":
+                if tc.function.name == "set_conditional_order":
+                    result = _call_set_conditional_order(
+                        args.get("stock_name", ""),
+                        args.get("condition_type", ""),
+                        float(args.get("condition_value", 0)),
+                        args.get("action", ""),
+                        int(args.get("quantity", 0)),
+                    )
+                    logger.info("[GPT] 조건부 주문 등록: %s", args)
+                elif tc.function.name == "list_conditional_orders":
+                    result = _call_list_conditional_orders()
+                elif tc.function.name == "cancel_conditional_order":
+                    result = _call_cancel_conditional_order(args.get("order_id", ""))
+                elif tc.function.name == "propose_trade":
                     act  = args.get("action", "")
                     code = args.get("stock_code", "")
                     name = args.get("stock_name", "")
@@ -422,6 +498,84 @@ Context Recall = (컨텍스트로 근거를 찾을 수 있는 답변 내 주장 
 def clear_history(user_id: int) -> None:
     """유저의 대화 기록 초기화."""
     _histories.pop(user_id, None)
+
+
+def _call_set_conditional_order(stock_name: str, condition_type: str,
+                                condition_value: float, action: str, quantity: int) -> str:
+    try:
+        from conditional_orders import add_order
+        # STOCKS에서 티커/코드 탐색
+        ticker, stock_code = "", ""
+        for t, name in STOCKS.items():
+            if name == stock_name:
+                ticker = t
+                stock_code = t.replace(".KS", "").replace(".KQ", "")
+                break
+        if not ticker:
+            return f"'{stock_name}' 종목을 STOCKS 목록에서 찾을 수 없습니다."
+
+        order = add_order(ticker, stock_name, stock_code,
+                          condition_type, condition_value, action, quantity)
+
+        ctype_label = {
+            "price_below":  f"현재가 < {condition_value:,.0f}원",
+            "price_above":  f"현재가 > {condition_value:,.0f}원",
+            "profit_above": f"수익률 > +{condition_value}%",
+            "profit_below": f"수익률 < {condition_value}%",
+        }.get(condition_type, condition_type)
+        action_label = {"buy": "매수", "sell": "매도", "sellall": "전량 매도"}.get(action, action)
+        qty_str = f"{quantity}주 " if action != "sellall" else ""
+
+        return (
+            f"✅ 조건부 주문 등록 완료 [#{order['id']}]\n"
+            f"  종목: {stock_name}({stock_code})\n"
+            f"  조건: {ctype_label}\n"
+            f"  실행: {action_label} {qty_str}(시장가)\n"
+            f"  5분 간격으로 조건 체크 후 자동 실행됩니다."
+        )
+    except Exception as e:
+        logger.error("조건부 주문 등록 오류: %s", e)
+        return f"조건부 주문 등록 실패: {e}"
+
+
+def _call_list_conditional_orders() -> str:
+    try:
+        from conditional_orders import list_orders
+        orders = list_orders()
+        if not orders:
+            return "등록된 조건부 주문이 없습니다."
+        lines = [f"[조건부 주문 목록 — {len(orders)}건]"]
+        for o in orders:
+            ctype_label = {
+                "price_below":  f"현재가 < {float(o['condition_value']):,.0f}원",
+                "price_above":  f"현재가 > {float(o['condition_value']):,.0f}원",
+                "profit_above": f"수익률 > +{o['condition_value']}%",
+                "profit_below": f"수익률 < {o['condition_value']}%",
+            }.get(o["condition_type"], o["condition_type"])
+            action_label = {"buy": "매수", "sell": "매도", "sellall": "전량 매도"}.get(o["action"], o["action"])
+            qty_str = f"{o['quantity']}주 " if o["action"] != "sellall" else ""
+            lines.append(
+                f"  #{o['id']} | {o['stock_name']}({o['stock_code']}) | "
+                f"조건: {ctype_label} → {action_label} {qty_str}| 등록: {o['created_at']}"
+            )
+        return "\n".join(lines)
+    except Exception as e:
+        return f"조건부 주문 조회 실패: {e}"
+
+
+def _call_cancel_conditional_order(order_id: str) -> str:
+    try:
+        from conditional_orders import cancel_order, list_orders
+        if order_id.lower() == "all":
+            orders = list_orders()
+            for o in orders:
+                cancel_order(o["id"])
+            return f"✅ 조건부 주문 {len(orders)}건 전체 취소 완료"
+        if cancel_order(order_id):
+            return f"✅ 조건부 주문 #{order_id} 취소 완료"
+        return f"⚠️ #{order_id}를 찾을 수 없습니다. list_conditional_orders로 ID를 확인하세요."
+    except Exception as e:
+        return f"조건부 주문 취소 실패: {e}"
 
 
 def _execute_trade_order(order: dict) -> str:

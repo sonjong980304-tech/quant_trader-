@@ -34,6 +34,7 @@ from notifier import (
     send_telegram, build_volume_surge_message, build_daily_summary_message,
 )
 from news_fetcher import fetch_naver_news
+from conditional_orders import check_and_execute as check_cond_orders
 
 KST      = pytz.timezone("Asia/Seoul")
 LOG_FILE = "logs/trader.log"
@@ -158,6 +159,15 @@ def send_daily_summary():
     for ticker, stock_name in STOCKS.items():
         try:
             daily_df = fetch_ohlcv(ticker, period_years=1)
+
+            # 오늘 실시간 바 반영 (분봉 기반)
+            minute_df = None
+            try:
+                minute_df = get_minute_data(ticker, interval_min=1)
+            except Exception:
+                pass
+            daily_df = _append_today_bar(daily_df, minute_df)
+
             daily_df = add_all_indicators(daily_df, short=MA_SHORT, long=MA_LONG, rsi_period=RSI_PERIOD)
             daily_df = detect_crossover(daily_df, short=MA_SHORT, long=MA_LONG)
             daily_df = generate_signals(daily_df)
@@ -235,6 +245,10 @@ def run_priority_loop():
         # ── 분봉 거래량 급증 감지 ────────────────────────
         if minute_df is not None and not minute_df.empty:
             _check_volume_surge(ticker, stock_name, minute_df, current_price)
+
+        # ── 조건부 주문 체크 ──────────────────────────
+        for cond_msg in check_cond_orders(ticker, stock_code, current_price, trader):
+            send_telegram(cond_msg)
 
         sig = get_latest_signal(daily_df)
         logger.info("  실시간 기준일: %s  현재가: %s원", sig["date"], f"{current_price:,.0f}")
