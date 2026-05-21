@@ -61,8 +61,8 @@ def build_sell_full_message(stock_name: str, signal: dict, reason: str = "") -> 
 def build_sell_partial_message(stock_name: str, signal: dict, reason: str = "") -> str:
     reason_line = f"\n사유: {reason}" if reason else ""
     return (
-        f"🟡 <b>매도 신호 (2원칙): {stock_name}</b>\n"
-        f"5~20일선 사이 거래량 증가 + 음봉 | 현재가: {signal.get('close', 0):,.0f}원\n"
+        f"🟡 <b>매도 신호 (1원칙-부분): {stock_name}</b>\n"
+        f"5일선 위 거래량 급증 + 장대음봉 | 현재가: {signal.get('close', 0):,.0f}원\n"
         f"MA5: {signal['ma_short']:,.0f} | MA20: {signal['ma_long']:,.0f}"
         f"{reason_line}"
     )

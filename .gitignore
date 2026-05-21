@@ -8,3 +8,4 @@ results/
 *.png
 *.plist
 stocks.py
+.omc/

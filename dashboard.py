@@ -13,7 +13,7 @@ import plotly.graph_objects as go
 import streamlit as st
 from plotly.subplots import make_subplots
 
-from config import STOCKS, ACTIVE_STRATEGY, LOG_FILE, KIS_APP_KEY
+from config import STOCKS, MA_SHORT, MA_LONG, RSI_PERIOD, LOG_FILE, KIS_APP_KEY
 from data_fetcher import fetch_ohlcv
 from indicators import add_all_indicators, detect_crossover
 from strategy import generate_signals, get_latest_signal
@@ -28,7 +28,7 @@ st.set_page_config(
 )
 
 st.title("📈 퀀트 자동매매 대시보드")
-st.caption(f"전략: MA{ACTIVE_STRATEGY['short_window']}/{ACTIVE_STRATEGY['long_window']} 골든크로스 + RSI{ACTIVE_STRATEGY['rsi_period']} | 마지막 갱신: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+st.caption(f"전략: MA{MA_SHORT}/MA{MA_LONG} + 거래량/캔들 전략 | 마지막 갱신: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
 # ─────────────────────────────────────────────
 # 사이드바 — 설정 및 수동 실행
@@ -70,11 +70,10 @@ with st.sidebar:
 # ─────────────────────────────────────────────
 @st.cache_data(ttl=60)
 def load_data(ticker: str):
-    s = ACTIVE_STRATEGY
     df = fetch_ohlcv(ticker, period_years=1)
-    df = add_all_indicators(df, short=s["short_window"], long=s["long_window"], rsi_period=s["rsi_period"])
-    df = detect_crossover(df, short=s["short_window"], long=s["long_window"])
-    df = generate_signals(df, strategy=s)
+    df = add_all_indicators(df, short=MA_SHORT, long=MA_LONG, rsi_period=RSI_PERIOD)
+    df = detect_crossover(df, short=MA_SHORT, long=MA_LONG)
+    df = generate_signals(df)
     return df
 
 
@@ -116,8 +115,6 @@ for i, ticker in enumerate(tickers):
             continue
 
         sig = get_latest_signal(df)
-        short = ACTIVE_STRATEGY["short_window"]
-        long_ = ACTIVE_STRATEGY["long_window"]
 
         # ── 상단 지표 카드 ──
         col1, col2, col3, col4, col5 = st.columns(5)
@@ -128,17 +125,18 @@ for i, ticker in enumerate(tickers):
         price_pct     = price_change / prev_price * 100
 
         col1.metric("현재가", f"{current_price:,.0f}원", f"{price_change:+,.0f} ({price_pct:+.2f}%)")
-        col2.metric(f"MA{short}", f"{sig['ma_short']:,.0f}원")
-        col3.metric(f"MA{long_}", f"{sig['ma_long']:,.0f}원")
+        col2.metric(f"MA{MA_SHORT}", f"{sig['ma_short']:,.0f}원")
+        col3.metric(f"MA{MA_LONG}", f"{sig['ma_long']:,.0f}원")
         col4.metric("RSI", f"{sig['rsi']}")
 
         # 신호 상태 배지
         if sig["buy"]:
-            col5.metric("신호", "🟢 매수")
+            principles = "/".join(sig.get("buy_which", []))
+            col5.metric("신호", f"🟢 매수({principles})")
         elif sig["sell_full"]:
-            col5.metric("신호", "🔴 전량매도")
+            col5.metric("신호", "🔴 매도(1원칙)")
         elif sig["sell_partial"]:
-            col5.metric("신호", "🟡 분할매도 50%")
+            col5.metric("신호", "🟡 매도(2원칙)")
         else:
             col5.metric("신호", "⚪ 없음")
 
@@ -160,27 +158,27 @@ for i, ticker in enumerate(tickers):
 
         # MA 라인
         fig.add_trace(go.Scatter(
-            x=df.index, y=df[f"MA_{short}"],
-            name=f"MA{short}", line=dict(color="#ff7f0e", width=1.2, dash="dash"),
+            x=df.index, y=df[f"MA_{MA_SHORT}"],
+            name=f"MA{MA_SHORT}", line=dict(color="#ff7f0e", width=1.2, dash="dash"),
         ), row=1, col=1)
         fig.add_trace(go.Scatter(
-            x=df.index, y=df[f"MA_{long_}"],
-            name=f"MA{long_}", line=dict(color="#2ca02c", width=1.2, dash="dot"),
+            x=df.index, y=df[f"MA_{MA_LONG}"],
+            name=f"MA{MA_LONG}", line=dict(color="#2ca02c", width=1.2, dash="dot"),
         ), row=1, col=1)
 
-        # 골든크로스 / 데드크로스 마커
-        gc = df[df["golden_cross"]]
-        dc = df[df["dead_cross"]]
-        if not gc.empty:
+        # 매수 / 매도 신호 마커
+        buy_marks  = df[df["buy_signal"]]
+        sell_marks = df[df["sell_full"] | df["sell_partial"]]
+        if not buy_marks.empty:
             fig.add_trace(go.Scatter(
-                x=gc.index, y=gc["Close"],
-                mode="markers", name="골든크로스",
-                marker=dict(symbol="triangle-up", size=12, color="gold"),
+                x=buy_marks.index, y=buy_marks["Close"],
+                mode="markers", name="매수 신호",
+                marker=dict(symbol="triangle-up", size=12, color="lime"),
             ), row=1, col=1)
-        if not dc.empty:
+        if not sell_marks.empty:
             fig.add_trace(go.Scatter(
-                x=dc.index, y=dc["Close"],
-                mode="markers", name="데드크로스",
+                x=sell_marks.index, y=sell_marks["Close"],
+                mode="markers", name="매도 신호",
                 marker=dict(symbol="triangle-down", size=12, color="red"),
             ), row=1, col=1)
 

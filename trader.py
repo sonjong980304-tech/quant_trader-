@@ -221,14 +221,14 @@ class KISTrader:
 
         holdings = []
         for item in data.get("output1", []):
-            qty = int(item.get("hldg_qty", 0))
+            qty = int(float(item.get("hldg_qty", 0)))
             if qty > 0:
                 holdings.append({
                     "stock_code":  item["pdno"],
                     "name":        item["prdt_name"],
                     "qty":         qty,
-                    "avg_price":   int(item.get("pchs_avg_pric", 0)),
-                    "eval_profit": int(item.get("evlu_pfls_amt", 0)),
+                    "avg_price":   int(float(item.get("pchs_avg_pric", 0))),
+                    "eval_profit": int(float(item.get("evlu_pfls_amt", 0))),
                 })
         return holdings
 
@@ -254,7 +254,7 @@ class KISTrader:
         if data.get("rt_cd") != "0":
             raise ValueError(f"주문 가능 금액 조회 실패: {data.get('msg1')}")
 
-        return int(data["output"].get("ord_psbl_cash", 0))
+        return int(float(data["output"].get("ord_psbl_cash", 0)))
 
 
 # ─────────────────────────────────────────────
