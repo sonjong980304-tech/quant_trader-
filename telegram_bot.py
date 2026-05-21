@@ -18,7 +18,7 @@ import logging
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-from config import TELEGRAM_BOT_TOKEN, STOCKS, ACTIVE_STRATEGY
+from config import TELEGRAM_BOT_TOKEN, STOCKS, MA_SHORT, MA_LONG, RSI_PERIOD
 from data_fetcher import fetch_ohlcv
 from indicators import add_all_indicators, detect_crossover
 from strategy import generate_signals, get_latest_signal
@@ -96,36 +96,58 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("⏳ 신호 조회 중...")
     stocks = read_stocks_from_config()
-    s = ACTIVE_STRATEGY
-    lines = [f"<b>📊 종목별 신호 ({s['name']})</b>\n"]
+    lines = [f"<b>📊 종목별 신호 (MA{MA_SHORT}/MA{MA_LONG} + 거래량/캔들 전략)</b>\n"]
+
+    # KIS API 가용 여부 확인 (실시간 현재가 조회용)
+    trader = None
+    try:
+        from config import KIS_APP_KEY
+        if KIS_APP_KEY:
+            from trader import KISTrader
+            trader = KISTrader()
+    except Exception:
+        pass
 
     for ticker, name in stocks.items():
         try:
             df = fetch_ohlcv(ticker, period_years=1)
-            df = add_all_indicators(df, short=s["short_window"], long=s["long_window"], rsi_period=s["rsi_period"])
-            df = detect_crossover(df, short=s["short_window"], long=s["long_window"])
-            df = generate_signals(df, strategy=s)
+            df = add_all_indicators(df, short=MA_SHORT, long=MA_LONG, rsi_period=RSI_PERIOD)
+            df = detect_crossover(df, short=MA_SHORT, long=MA_LONG)
+            df = generate_signals(df)
             sig = get_latest_signal(df)
-            price = df["Close"].iloc[-1]
+
+            # 실시간 현재가: KIS API 우선, 없으면 일봉 종가(전일 종가)
+            stock_code = ticker.replace(".KS", "").replace(".KQ", "")
+            if trader:
+                try:
+                    price_info = trader.get_current_price(stock_code)
+                    price = float(price_info["price"])
+                except Exception:
+                    price = float(df["Close"].iloc[-1])
+            else:
+                price = float(df["Close"].iloc[-1])
 
             if sig["buy"]:
-                icon, signal_txt = "🟢", "매수"
+                principles = "/".join(sig.get("buy_which", []))
+                icon, signal_txt = "🟢", f"매수({principles})"
             elif sig["sell_full"]:
-                icon, signal_txt = "🔴", "전량매도"
+                icon, signal_txt = "🔴", "매도(1원칙)"
             elif sig["sell_partial"]:
-                icon, signal_txt = "🟡", "분할매도"
+                icon, signal_txt = "🟡", "매도(2원칙)"
             else:
                 icon, signal_txt = "⚪", "없음"
 
             lines.append(
                 f"{icon} <b>{name}</b>\n"
                 f"   현재가: {price:,.0f}원 | RSI: {sig['rsi']}\n"
-                f"   MA{s['short_window']}: {sig['ma_short']:,.0f} / MA{s['long_window']}: {sig['ma_long']:,.0f}\n"
+                f"   MA{MA_SHORT}: {sig['ma_short']:,.0f} / MA{MA_LONG}: {sig['ma_long']:,.0f}\n"
                 f"   신호: {signal_txt}\n"
             )
         except Exception as e:
             lines.append(f"⚠️ <b>{name}</b>: 조회 실패\n")
 
+    price_label = "실시간" if trader else "전일 종가"
+    lines.append(f"<i>현재가 기준: {price_label}</i>")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 
@@ -310,7 +332,7 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "  예) /sell 010140 5\n"
         "/sellall 코드        — 전량 매도\n"
         "  예) /sellall 010140\n\n"
-        f"현재 전략: MA{ACTIVE_STRATEGY['short_window']}/{ACTIVE_STRATEGY['long_window']} + RSI≥{ACTIVE_STRATEGY['rsi_buy_threshold']}\n"
+        f"현재 전략: MA{MA_SHORT}/MA{MA_LONG} + 거래량/캔들 전략\n"
         f"현재 종목 수: {len(stocks)}개"
     )
     await update.message.reply_text(msg, parse_mode="HTML")
