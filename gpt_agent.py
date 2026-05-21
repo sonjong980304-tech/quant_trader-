@@ -1,0 +1,608 @@
+"""
+gpt_agent.py - GPT 기반 주식 질의응답 에이전트
+
+ask(user_id, question) → str
+
+동작 방식:
+  1. 전략/포지션/종목 정보를 시스템 프롬프트에 주입
+  2. GPT가 재무 수치가 필요하다고 판단하면 get_naver_finance 툴 자동 호출
+  3. 이미 알고 있는 정보(전략, 원칙 등)는 툴 없이 바로 답변
+"""
+
+import json
+import logging
+from openai import OpenAI
+
+from config import (
+    OPENAI_API_KEY, STOCKS, MA_SHORT, MA_LONG,
+    VOLUME_INCREASE_RATIO, VOLUME_SURGE_RATIO, VOLUME_SURGE_MINUTE_RATIO,
+    VOLUME_LOOKBACK_DAYS,
+)
+
+logger = logging.getLogger(__name__)
+
+client = OpenAI(api_key=OPENAI_API_KEY)
+
+_histories: dict[int, list[dict]] = {}
+_MAX_HISTORY = 20   # 유저당 최대 보관 메시지 수
+
+_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_naver_finance",
+            "description": (
+                "Naver 증권에서 특정 종목의 재무정보를 실시간으로 조회합니다. "
+                "PER, PBR, ROE, EPS, BPS, 매출액, 영업이익, 당기순이익, 부채비율, "
+                "시가배당률 등 구체적인 수치가 필요하거나 확신이 없을 때 사용하세요. "
+                "매매 전략·원칙·파라미터처럼 이미 알고 있는 정보는 이 툴 없이 바로 답변하세요."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "identifier": {
+                        "type": "string",
+                        "description": (
+                            "조회할 종목의 이름(예: '삼성전자') 또는 "
+                            "6자리 종목코드(예: '005930')"
+                        ),
+                    }
+                },
+                "required": ["identifier"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_yahoo_finance",
+            "description": (
+                "Yahoo Finance에서 미국 주식의 재무지표를 조회합니다. "
+                "PER, PBR, EPS, ROE, 매출액, 영업이익, 순이익, 부채비율, 시가총액, 배당수익률 등 "
+                "시계열 재무제표 데이터도 포함합니다. "
+                "미국 주식(AAPL, TSLA, NVDA 등) 재무 질문에 사용하세요."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ticker": {
+                        "type": "string",
+                        "description": "Yahoo Finance 티커 심볼 (예: 'AAPL', 'TSLA', 'NVDA', 'MSFT')",
+                    }
+                },
+                "required": ["ticker"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_naver_news",
+            "description": (
+                "네이버 뉴스 API로 특정 종목 또는 키워드 관련 최신 뉴스를 검색합니다. "
+                "'최근 뉴스', '요즘 이슈', '뭔 일 있어?', '기사 찾아줘' 같은 질문에 사용하세요."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "검색할 종목명 또는 키워드 (예: 'LG전자', '반도체 업황')",
+                    },
+                    "n": {
+                        "type": "integer",
+                        "description": "가져올 뉴스 건수 (기본 5, 최대 10)",
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_stock_signal",
+            "description": (
+                "특정 종목의 현재 기술적 지표와 매수/매도 원칙별 충족 여부를 상세히 분석합니다. "
+                "현재가, MA5, MA20, RSI, 거래량 비율, 캔들 타입, "
+                "각 매수/매도 원칙의 조건 충족 여부(실제 수치 포함)를 반환합니다. "
+                "'왜 매수 신호가 없어?', '오늘 신호 어때?', '조건 분석해줘' 같은 질문에 사용하세요."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "identifier": {
+                        "type": "string",
+                        "description": (
+                            "분석할 종목의 이름(예: 'LG전자') 또는 "
+                            "6자리 종목코드(예: '066570')"
+                        ),
+                    }
+                },
+                "required": ["identifier"],
+            },
+        },
+    },
+]
+
+
+def _build_system_prompt() -> str:
+    # 실제 계좌 잔고 (KIS API 우선, 실패 시 인메모리 positions 폴백)
+    cash_text = "  (현금 정보 없음)"
+    positions_text = "  현재 보유 종목 없음"
+    try:
+        from trader import KISTrader
+        from config import KIS_APP_KEY
+        if KIS_APP_KEY:
+            t = KISTrader()
+            holdings = t.get_balance()
+            cash = t.get_available_cash()
+            cash_text = f"  주문 가능 현금: {cash:,}원"
+            if holdings:
+                pos_lines = []
+                for h in holdings:
+                    pos_lines.append(
+                        f"  - {h['name']} ({h['stock_code']}): "
+                        f"평균매수가 {h['avg_price']:,}원, "
+                        f"수량 {h['qty']}주, "
+                        f"평가손익 {h['eval_profit']:+,}원"
+                    )
+                positions_text = "\n".join(pos_lines)
+        else:
+            raise ValueError("KIS_APP_KEY 없음")
+    except Exception:
+        # KIS API 실패 시 인메모리 positions 폴백
+        try:
+            from trader import positions
+            if positions:
+                pos_lines = []
+                for ticker, info in positions.items():
+                    name = STOCKS.get(ticker, ticker)
+                    pos_lines.append(
+                        f"  - {name} ({ticker}): "
+                        f"평균매수가 {info.get('avg_price', 0):,.0f}원, "
+                        f"수량 {info.get('quantity', 0)}주"
+                    )
+                positions_text = "\n".join(pos_lines)
+        except Exception:
+            positions_text = "  (포지션 정보 로드 실패)"
+
+    stocks_text = "\n".join(
+        [f"  - {name} ({ticker})" for ticker, name in STOCKS.items()]
+    ) or "  (종목 없음)"
+
+    return f"""당신은 주식 자동매매 시스템의 AI 어시스턴트입니다.
+사용자의 매매 전략·보유 현황을 정확히 알고 있으며, 주식 관련 질문에 도움을 줍니다.
+PER, 영업이익처럼 실시간 재무 수치가 필요한 경우에만 get_naver_finance 툴을 호출하세요.
+전략·원칙·파라미터 등 이미 알고 있는 내용은 툴 없이 바로 답변하세요.
+답변은 반드시 한국어로 하세요.
+
+━━━ 매매 전략 원칙 ━━━
+
+▶ 매수 1원칙 (시가돌파 — 분봉 기반, 9:30 이후 장중 실시간)
+  - 전일 종가 > MA{MA_SHORT} (5일선 위에 있는 상태)
+  - 9:00~9:30 사이 저가가 장 시작 시가(9:00 첫 캔들 open) 아래로 한 번이라도 내려간 적 있을 것
+  - 9:30 이후 현재가가 장 시작 시가를 상향 돌파 (직전 캔들 ≤ 시가 < 현재 캔들)
+  - 돌파 캔들 거래량 > 직전 5분봉 평균 거래량 × {VOLUME_INCREASE_RATIO}배
+
+▶ 매수 2원칙 (MA사이반등 — 일봉 기반)
+  - 전일 종가가 MA{MA_SHORT}(5일선)~MA{MA_LONG}(20일선) 사이
+  - 당일 거래량 증가 (50일 평균 × {VOLUME_INCREASE_RATIO}배 이상) + 양봉
+
+▶ 매수 3원칙 (MA20아래급등 — 일봉 기반)
+  - 전일 종가 < MA{MA_LONG} (20일선 아래)
+  - 당일 거래량 급증 (50일 평균 × {VOLUME_SURGE_RATIO}배 이상) + 양봉 또는 도지
+
+▶ 매도 1원칙 (부분매도 50%)
+  - 종가 > MA{MA_SHORT} 상태에서 장대음봉 + 거래량 급증 (50일 평균 × {VOLUME_SURGE_RATIO}배)
+  - 실행: 보유량 50% 시장가 매도
+
+▶ 매도 2원칙 (전량매도)
+  - 종가가 MA{MA_SHORT}~MA{MA_LONG} 사이 + 거래량 증가 (× {VOLUME_INCREASE_RATIO}) + 음봉
+  - 실행: 전량 시장가 매도
+
+━━━ 거래량 파라미터 ━━━
+  평균 산정 기간 : 직전 {VOLUME_LOOKBACK_DAYS}일
+  증가 기준      : 50일 평균 × {VOLUME_INCREASE_RATIO}배
+  급증 기준(일봉): 50일 평균 × {VOLUME_SURGE_RATIO}배
+  급증 기준(분봉): 직전 5분봉 평균 × {VOLUME_SURGE_MINUTE_RATIO}배
+  분봉 급증 감지 시 네이버 뉴스 3건 텔레그램 전송
+
+━━━ 이동평균 ━━━
+  단기: MA{MA_SHORT} (5일 단순이동평균)
+  장기: MA{MA_LONG} (20일 단순이동평균)
+  RSI 보조지표: 14일
+
+━━━ 거래 실행 방식 ━━━
+  매수 사이클 : 5분 간격 (9:05, 9:10 … 15:25)
+  포지션 크기 : 총 자산(현금+평가액)의 40%로 시장가 매수
+  매도 우선순위: 매도신호 먼저 체크 후 매수신호 체크
+
+━━━ 계좌 현황 ━━━
+{cash_text}
+
+━━━ 현재 보유 종목 ━━━
+{positions_text}
+
+━━━ 매매 대상 종목 목록 ━━━
+{stocks_text}"""
+
+
+def ask(user_id: int, question: str) -> str:
+    """
+    사용자 질문에 GPT로 답변.
+    필요 시 Naver Finance 툴을 자동 호출해 재무 데이터를 보강.
+    """
+    history = _histories.setdefault(user_id, [])
+    history.append({"role": "user", "content": question})
+
+    # 히스토리 크기 제한
+    if len(history) > _MAX_HISTORY:
+        _histories[user_id] = history[-_MAX_HISTORY:]
+        history = _histories[user_id]
+
+    messages = [{"role": "system", "content": _build_system_prompt()}] + history
+
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4.1",
+            messages=messages,
+            tools=_TOOLS,
+            tool_choice="auto",
+        )
+        msg = resp.choices[0].message
+
+        # ── 툴 호출이 있으면 처리 ──
+        tool_results: list[str] = []
+        if msg.tool_calls:
+            messages.append(msg)
+
+            for tc in msg.tool_calls:
+                args = json.loads(tc.function.arguments)
+                identifier = args.get("identifier", "")
+                if tc.function.name == "get_yahoo_finance":
+                    yt = args.get("ticker", "")
+                    logger.info("[GPT] Yahoo Finance 조회 요청: %s", yt)
+                    result = _call_yahoo_finance(yt)
+                elif tc.function.name == "get_naver_finance":
+                    logger.info("[GPT] Naver Finance 조회 요청: %s", identifier)
+                    result = _call_naver_finance(identifier)
+                elif tc.function.name == "get_stock_signal":
+                    logger.info("[GPT] 종목 신호 분석 요청: %s", identifier)
+                    result = _call_stock_signal(identifier)
+                elif tc.function.name == "get_naver_news":
+                    query = args.get("query", "")
+                    n     = int(args.get("n", 5))
+                    logger.info("[GPT] 네이버 뉴스 검색 요청: %s (%d건)", query, n)
+                    result = _call_naver_news(query, n)
+                else:
+                    result = f"알 수 없는 툴: {tc.function.name}"
+                tool_results.append(result)
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": result,
+                })
+
+            # 툴 결과 포함해서 최종 답변 생성
+            resp2 = client.chat.completions.create(
+                model="gpt-4.1",
+                messages=messages,
+            )
+            answer = resp2.choices[0].message.content or ""
+
+        else:
+            answer = msg.content or ""
+
+    except Exception as e:
+        logger.error("GPT 응답 오류: %s", e)
+        answer = f"⚠️ GPT 응답 오류: {e}"
+
+    # ── 툴을 사용한 경우 Context Recall 평가 (서브에이전트) ──
+    if tool_results:
+        score = _eval_context_recall("\n\n".join(tool_results), answer)
+        answer_with_score = f"{answer}\n\n─────────────────\n📊 Context Recall: {score:.2f}"
+    else:
+        answer_with_score = answer
+
+    history.append({"role": "assistant", "content": answer})  # 히스토리엔 점수 제외
+    return answer_with_score
+
+
+def _eval_context_recall(context: str, answer: str) -> float:
+    """
+    서브에이전트 GPT가 Context Recall을 평가.
+    context: 툴에서 검색된 실제 데이터
+    answer:  메인 GPT가 생성한 최종 답변
+    반환: 0.0 ~ 1.0
+    """
+    prompt = f"""당신은 RAG 평가 전문가입니다.
+아래 [검색된 컨텍스트]와 [생성된 답변]을 분석하여 Context Recall 점수를 계산하세요.
+
+Context Recall = (컨텍스트로 근거를 찾을 수 있는 답변 내 주장 수) / (답변 내 전체 주장 수)
+
+[검색된 컨텍스트]
+{context}
+
+[생성된 답변]
+{answer}
+
+0.00~1.00 사이의 숫자만 반환하세요. 설명 없이 숫자만."""
+
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4.1-mini",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=10,
+            temperature=0,
+        )
+        raw = resp.choices[0].message.content.strip()
+        return round(min(max(float(raw), 0.0), 1.0), 2)
+    except Exception as e:
+        logger.warning("Context Recall 평가 실패: %s", e)
+        return -1.0
+
+
+def clear_history(user_id: int) -> None:
+    """유저의 대화 기록 초기화."""
+    _histories.pop(user_id, None)
+
+
+def _call_yahoo_finance(ticker: str) -> str:
+    try:
+        import yfinance as yf
+
+        t = yf.Ticker(ticker.upper())
+        info = t.info
+
+        if not info or info.get("quoteType") is None:
+            return f"'{ticker}' 종목을 Yahoo Finance에서 찾을 수 없습니다."
+
+        name    = info.get("longName") or info.get("shortName") or ticker
+        currency = info.get("currency", "USD")
+
+        def fmt_num(v, unit="", pct=False):
+            if v is None:
+                return "N/A"
+            if pct:
+                return f"{v * 100:.2f}%"
+            if abs(v) >= 1e12:
+                return f"{v / 1e12:.2f}T {currency}{unit}"
+            if abs(v) >= 1e9:
+                return f"{v / 1e9:.2f}B {currency}{unit}"
+            if abs(v) >= 1e6:
+                return f"{v / 1e6:.2f}M {currency}{unit}"
+            return f"{v:,.2f}{unit}"
+
+        lines = [f"[{name} ({ticker.upper()}) — Yahoo Finance 재무지표]", ""]
+
+        # 주가 정보
+        lines.append("● 주가")
+        lines.append(f"  현재가      : {fmt_num(info.get('currentPrice'))} {currency}")
+        lines.append(f"  52주 고/저  : {fmt_num(info.get('fiftyTwoWeekHigh'))} / {fmt_num(info.get('fiftyTwoWeekLow'))}")
+        lines.append(f"  시가총액    : {fmt_num(info.get('marketCap'))}")
+
+        # 밸류에이션
+        lines.append("\n● 밸류에이션")
+        lines.append(f"  PER (TTM)   : {fmt_num(info.get('trailingPE'))}")
+        lines.append(f"  PER (FWD)   : {fmt_num(info.get('forwardPE'))}")
+        lines.append(f"  PBR         : {fmt_num(info.get('priceToBook'))}")
+        lines.append(f"  EPS (TTM)   : {fmt_num(info.get('trailingEps'))} {currency}")
+        lines.append(f"  EPS (FWD)   : {fmt_num(info.get('forwardEps'))} {currency}")
+
+        # 수익성
+        lines.append("\n● 수익성")
+        lines.append(f"  매출액      : {fmt_num(info.get('totalRevenue'))}")
+        lines.append(f"  영업이익률  : {fmt_num(info.get('operatingMargins'), pct=True)}")
+        lines.append(f"  순이익률    : {fmt_num(info.get('profitMargins'), pct=True)}")
+        lines.append(f"  ROE         : {fmt_num(info.get('returnOnEquity'), pct=True)}")
+        lines.append(f"  ROA         : {fmt_num(info.get('returnOnAssets'), pct=True)}")
+
+        # 재무 건전성
+        lines.append("\n● 재무 건전성")
+        lines.append(f"  부채비율(D/E): {fmt_num(info.get('debtToEquity'))}")
+        lines.append(f"  유동비율    : {fmt_num(info.get('currentRatio'))}")
+        lines.append(f"  잉여현금흐름: {fmt_num(info.get('freeCashflow'))}")
+
+        # 배당
+        div_yield = info.get("dividendYield")
+        lines.append("\n● 배당")
+        lines.append(f"  시가배당률  : {fmt_num(div_yield, pct=True)}")
+        lines.append(f"  주당배당금  : {fmt_num(info.get('dividendRate'))} {currency}")
+
+        # 연간 실적 시계열 (최근 3년)
+        try:
+            fin = t.financials
+            if fin is not None and not fin.empty:
+                lines.append("\n● 연간 실적 (최근 3년)")
+                cols = fin.columns[:3]
+                for row_key, label in [
+                    ("Total Revenue",    "매출액"),
+                    ("Operating Income", "영업이익"),
+                    ("Net Income",       "순이익"),
+                ]:
+                    if row_key in fin.index:
+                        vals = "  |  ".join(
+                            f"{str(c)[:4]}: {fmt_num(fin.loc[row_key, c])}"
+                            for c in cols
+                        )
+                        lines.append(f"  {label}: {vals}")
+        except Exception:
+            pass
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        logger.error("Yahoo Finance 툴 오류: %s", e)
+        return f"Yahoo Finance 조회 오류: {e}"
+
+
+def _call_naver_news(query: str, n: int = 5) -> str:
+    try:
+        from news_fetcher import fetch_naver_news
+        n = min(max(1, n), 10)
+        items = fetch_naver_news(query, n=n)
+        if not items:
+            return f"'{query}' 관련 뉴스를 찾을 수 없습니다. (NAVER API 키 확인 필요)"
+        lines = [f"[{query} — 네이버 최신 뉴스 {len(items)}건]"]
+        for i, item in enumerate(items, 1):
+            title   = item.get("title", "제목 없음")
+            link    = item.get("link", "")
+            pub     = item.get("pubDate", "")
+            desc    = item.get("description", "")
+            lines.append(f"\n{i}. {title}")
+            if pub:
+                lines.append(f"   📅 {pub}")
+            if desc:
+                lines.append(f"   {desc[:100]}{'...' if len(desc) > 100 else ''}")
+            if link:
+                lines.append(f"   🔗 {link}")
+        return "\n".join(lines)
+    except Exception as e:
+        logger.error("네이버 뉴스 툴 오류: %s", e)
+        return f"네이버 뉴스 조회 오류: {e}"
+
+
+def _call_naver_finance(identifier: str) -> str:
+    try:
+        from naver_finance import get_financials
+        return get_financials(identifier)
+    except Exception as e:
+        logger.error("Naver Finance 툴 오류: %s", e)
+        return f"Naver Finance 조회 오류: {e}"
+
+
+def _call_stock_signal(identifier: str) -> str:
+    try:
+        from config import (
+            STOCKS, MA_SHORT, MA_LONG, RSI_PERIOD,
+            VOLUME_LOOKBACK_DAYS, VOLUME_INCREASE_RATIO, VOLUME_SURGE_RATIO,
+        )
+        from data_fetcher import fetch_ohlcv
+        from indicators import add_all_indicators, detect_crossover
+        from strategy import generate_signals, get_latest_signal
+
+        # 티커 탐색
+        ticker = None
+        stock_name = identifier
+        clean = identifier.replace(".KS", "").replace(".KQ", "").strip()
+
+        for t, name in STOCKS.items():
+            code = t.replace(".KS", "").replace(".KQ", "")
+            if identifier.strip() in (t, code, name) or clean in (code, name):
+                ticker = t
+                stock_name = name
+                break
+
+        if not ticker:
+            if clean.isdigit() and len(clean) == 6:
+                import yfinance as yf
+                for suffix in [".KS", ".KQ"]:
+                    df_test = yf.download(f"{clean}{suffix}", period="5d", progress=False, auto_adjust=True)
+                    if not df_test.empty:
+                        ticker = f"{clean}{suffix}"
+                        stock_name = clean
+                        break
+            if not ticker:
+                return f"'{identifier}' 종목을 찾을 수 없습니다."
+
+        stock_code = ticker.replace(".KS", "").replace(".KQ", "")
+
+        # 데이터 수집 및 지표 계산
+        df = fetch_ohlcv(ticker, period_years=1)
+        try:
+            from runner import _append_today_bar
+            from data_fetcher import get_minute_data
+            minute_df = None
+            try:
+                minute_df = get_minute_data(ticker, interval_min=1)
+            except Exception:
+                pass
+            df = _append_today_bar(df, minute_df)
+        except Exception:
+            pass
+
+        df = add_all_indicators(df, short=MA_SHORT, long=MA_LONG, rsi_period=RSI_PERIOD)
+        df = detect_crossover(df, short=MA_SHORT, long=MA_LONG)
+        df = generate_signals(df)
+        sig = get_latest_signal(df)
+
+        last = df.iloc[-1]
+        prev = df.iloc[-2]
+
+        close      = sig["close"]
+        ma5        = sig["ma_short"]
+        ma20       = sig["ma_long"]
+        rsi        = sig["rsi"]
+        volume     = sig["volume"]
+        open_price = float(last["Open"])
+        prev_close = float(prev["Close"])
+        prev_ma5   = float(prev[f"MA_{MA_SHORT}"])
+        prev_ma20  = float(prev[f"MA_{MA_LONG}"])
+        ma_min     = min(prev_ma5, prev_ma20)
+        ma_max     = max(prev_ma5, prev_ma20)
+
+        vol_avg   = float(df["Volume"].rolling(window=VOLUME_LOOKBACK_DAYS, min_periods=1).mean().shift(1).iloc[-1])
+        vol_ratio = volume / vol_avg if vol_avg > 0 else 0
+
+        candle = "양봉" if close > open_price else ("음봉" if close < open_price else "도지")
+
+        def chk(cond): return "✅" if cond else "❌"
+
+        c1_a = prev_close > prev_ma5
+        c1_b = float(last["Low"]) < open_price
+        c1_c = close > open_price
+        c1   = bool(last.get("buy_signal_1", False))
+
+        c2_a = ma_min < prev_close < ma_max
+        c2_b = vol_ratio >= VOLUME_INCREASE_RATIO
+        c2_c = close > open_price
+        c2   = bool(last.get("buy_signal_2", False))
+
+        c3_a = prev_close < prev_ma20
+        c3_b = vol_ratio >= VOLUME_SURGE_RATIO
+        c3_c = close >= open_price
+        c3   = bool(last.get("buy_signal_3", False))
+
+        lines = [
+            f"[{stock_name} ({stock_code}) — {sig['date']} 기준 신호 분석]",
+            f"",
+            f"● 현재가: {close:,.0f}원  MA5: {ma5:,.0f}  MA20: {ma20:,.0f}  RSI: {rsi}",
+            f"● 캔들: {candle} (시가 {open_price:,.0f}원)",
+            f"● 거래량: {volume:,}주  ({vol_ratio:.2f}배 / {VOLUME_LOOKBACK_DAYS}일 평균 {vol_avg:,.0f}주)",
+            f"",
+            f"▶ 1원칙 (시가돌파)",
+            f"  {chk(c1_a)} 전일 종가({prev_close:,.0f}) > MA5({prev_ma5:,.0f})",
+            f"  {chk(c1_b)} 당일 저가({float(last['Low']):,.0f}) < 시가({open_price:,.0f})",
+            f"  {chk(c1_c)} 당일 종가 > 시가 (양봉)",
+            f"  → {'✅ 신호 발생' if c1 else '❌ 미발생'}",
+            f"",
+            f"▶ 2원칙 (MA사이반등)",
+            f"  {chk(c2_a)} 전일 종가({prev_close:,.0f})가 MA5({prev_ma5:,.0f})~MA20({prev_ma20:,.0f}) 사이",
+            f"  {chk(c2_b)} 거래량 비율 {vol_ratio:.2f}배 ≥ {VOLUME_INCREASE_RATIO}배 기준",
+            f"  {chk(c2_c)} 양봉",
+            f"  → {'✅ 신호 발생' if c2 else '❌ 미발생'}",
+            f"",
+            f"▶ 3원칙 (MA20아래급등)",
+            f"  {chk(c3_a)} 전일 종가({prev_close:,.0f}) < MA20({prev_ma20:,.0f})",
+            f"  {chk(c3_b)} 거래량 비율 {vol_ratio:.2f}배 ≥ {VOLUME_SURGE_RATIO}배 기준",
+            f"  {chk(c3_c)} 양봉 또는 도지",
+            f"  → {'✅ 신호 발생' if c3 else '❌ 미발생'}",
+            f"",
+            f"━━━ 종합 신호 ━━━",
+        ]
+
+        if sig["buy"]:
+            lines.append(f"✅ 매수: {'/'.join(sig['buy_which'])}")
+        elif sig["sell_partial"]:
+            lines.append(f"🟡 매도(부분): {'/'.join(sig['sell_which'])}")
+        elif sig["sell_full"]:
+            lines.append(f"🔴 매도(전량): {'/'.join(sig['sell_which'])}")
+        else:
+            lines.append("⚪ 매수/매도 신호 없음")
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        logger.error("종목 신호 분석 오류: %s", e)
+        return f"신호 분석 오류: {e}"
