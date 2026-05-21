@@ -120,7 +120,7 @@ def _append_today_bar(daily_df: pd.DataFrame, minute_df) -> pd.DataFrame:
 
 
 def _check_volume_surge(ticker: str, stock_name: str, minute_df, current_price: float):
-    """분봉 거래량 급증(3.5배↑) 감지 → 네이버 뉴스 3건 텔레그램 전송."""
+    """분봉 거래량 급증(5배↑) 감지 → 네이버 뉴스 3건 텔레그램 전송."""
     if minute_df is None or minute_df.empty or len(minute_df) < 6:
         return
 
