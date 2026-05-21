@@ -117,14 +117,42 @@ GPT: ⚠️ 삼성전자(005930) 10주 시장가 매수
 ## 전체 아키텍처
 
 ```
-[ macOS launchd — 3개 데몬 상시 실행 ]
-        │
-        ├─ com.quant.trader.plist      → runner.py        (5분 간격 장중 자동매매)
-        ├─ com.quant.telegrambot.plist → telegram_bot.py  (사용자 인터페이스)
-        └─ com.quant.dashboard.plist  → dashboard.py      (Streamlit 모니터링)
-
-[ 수동 실행 ]
-        └─ graph.py  (LangGraph 단발성 에이전트, /run 명령어로 트리거)
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    macOS launchd — 3개 데몬 상시 실행                         │
+├──────────────────┬──────────────────────────┬──────────────────────────────┤
+│  runner.py       │  telegram_bot.py          │  dashboard.py                │
+│  (5분 장중 루프)  │  (사용자 인터페이스)        │  (Streamlit 모니터링)          │
+└────────┬─────────┴───────────┬──────────────┴──────────────────────────────┘
+         │                     │
+         │    ┌────────────────▼─────────────────────────────────────────┐
+         │    │              gpt_agent.py  (GPT-4.1)                     │
+         │    │                                                           │
+         │    │  시스템 프롬프트: 매매 전략 + 실시간 잔고(KIS API)           │
+         │    │                                                           │
+         │    │  툴 자동 호출                                              │
+         │    │  ├─ get_stock_signal ──▶ fetch_ohlcv + generate_signals  │
+         │    │  │                       (runner.py와 동일 파이프라인)      │
+         │    │  ├─ get_naver_finance ─▶ naver_finance.py (스크래핑)      │
+         │    │  ├─ get_yahoo_finance ─▶ yfinance (미국 주식)              │
+         │    │  ├─ get_naver_news ───▶ news_fetcher.py (네이버 API)      │
+         │    │  ├─ propose_trade ────▶ KIS API 실제 주문 (2단계 확인)     │
+         │    │  ├─ set_conditional_order ▶ conditional_orders.py 저장    │
+         │    │  ├─ list/cancel_conditional_order                        │
+         │    │  └─ Context Recall 평가 (gpt-4.1-mini 서브에이전트)        │
+         │    └──────────────────────────────────────────────────────────┘
+         │
+         │    ┌─────────────────────────────────────────────────────────┐
+         │    │  /run 명령어 → graph.py (LangGraph 단발성 에이전트)       │
+         │    │  fetch_data → calc_indicators → detect_signal           │
+         │    │      → (신호 있음) → send_notification → save_log        │
+         │    └─────────────────────────────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  공통 데이터 레이어                                                            │
+│  yfinance (일봉 1년)  ·  KIS API (분봉·현재가·주문·잔고)                       │
+│  conditional_orders.json (조건부 주문 영속 저장)                               │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
