@@ -26,6 +26,10 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 _histories: dict[int, list[dict]] = {}
 _MAX_HISTORY = 20   # 유저당 최대 보관 메시지 수
 
+_pending_orders: dict[int, dict] = {}   # 확인 대기 중인 주문
+_CONFIRM_WORDS = {"응", "네", "맞아", "맞습니다", "진행", "진행해", "확인", "예", "yes", "ㅇ", "ㅇㅇ", "해줘", "실행", "실행해", "고"}
+_DENY_WORDS    = {"아니", "아니오", "아니요", "취소", "no", "ㄴ", "그만", "안해", "안 해", "하지마", "하지 마"}
+
 _TOOLS = [
     {
         "type": "function",
@@ -49,6 +53,41 @@ _TOOLS = [
                     }
                 },
                 "required": ["identifier"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "propose_trade",
+            "description": (
+                "사용자가 명시적으로 매수/매도 주문을 요청할 때 호출합니다. "
+                "실제 주문 전 사용자에게 확인을 받기 위해 주문 내용을 제안합니다. "
+                "'삼성전자 10주 사줘', '현대차 팔아줘', '전량 매도해줘' 같은 직접적인 주문 요청에만 사용하세요. "
+                "분석·조회 질문에는 절대 사용하지 마세요."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["buy", "sell", "sellall"],
+                        "description": "buy: 매수 / sell: 일부 매도 / sellall: 전량 매도",
+                    },
+                    "stock_code": {
+                        "type": "string",
+                        "description": "6자리 종목코드 (예: '005930'). .KS/.KQ 제외",
+                    },
+                    "stock_name": {
+                        "type": "string",
+                        "description": "종목명 (예: '삼성전자')",
+                    },
+                    "quantity": {
+                        "type": "integer",
+                        "description": "주문 수량. sellall이면 0",
+                    },
+                },
+                "required": ["action", "stock_code", "stock_name", "quantity"],
             },
         },
     },
@@ -173,9 +212,16 @@ def _build_system_prompt() -> str:
 
     return f"""당신은 주식 자동매매 시스템의 AI 어시스턴트입니다.
 사용자의 매매 전략·보유 현황을 정확히 알고 있으며, 주식 관련 질문에 도움을 줍니다.
-PER, 영업이익처럼 실시간 재무 수치가 필요한 경우에만 get_naver_finance 툴을 호출하세요.
-전략·원칙·파라미터 등 이미 알고 있는 내용은 툴 없이 바로 답변하세요.
 답변은 반드시 한국어로 하세요.
+
+━━━ 툴 사용 규칙 ━━━
+- 실시간 재무 수치(PER, 영업이익 등) 한국 주식 → get_naver_finance
+- 실시간 재무 수치 미국 주식 → get_yahoo_finance
+- 종목 신호/원칙 분석 → get_stock_signal
+- 뉴스 검색 → get_naver_news
+- 이미 알고 있는 정보(전략, 원칙, 파라미터)는 툴 없이 바로 답변
+- 사용자가 매수/매도/전량매도를 명시적으로 요청하면 반드시 propose_trade 툴을 호출하세요.
+  텍스트로만 확인을 묻지 말고 반드시 툴을 호출해야 합니다.
 
 ━━━ 매매 전략 원칙 ━━━
 
@@ -233,6 +279,20 @@ def ask(user_id: int, question: str) -> str:
     사용자 질문에 GPT로 답변.
     필요 시 Naver Finance 툴을 자동 호출해 재무 데이터를 보강.
     """
+    # ── 대기 중인 주문 확인 응답 처리 ──
+    if user_id in _pending_orders:
+        lower = question.strip().lower()
+        if any(w in lower for w in _CONFIRM_WORDS):
+            order  = _pending_orders.pop(user_id)
+            result = _execute_trade_order(order)
+            _histories.setdefault(user_id, []).append({"role": "assistant", "content": result})
+            return result
+        elif any(w in lower for w in _DENY_WORDS):
+            _pending_orders.pop(user_id)
+            msg = "🚫 주문을 취소했습니다."
+            _histories.setdefault(user_id, []).append({"role": "assistant", "content": msg})
+            return msg
+
     history = _histories.setdefault(user_id, [])
     history.append({"role": "user", "content": question})
 
@@ -260,7 +320,23 @@ def ask(user_id: int, question: str) -> str:
             for tc in msg.tool_calls:
                 args = json.loads(tc.function.arguments)
                 identifier = args.get("identifier", "")
-                if tc.function.name == "get_yahoo_finance":
+                if tc.function.name == "propose_trade":
+                    act  = args.get("action", "")
+                    code = args.get("stock_code", "")
+                    name = args.get("stock_name", "")
+                    qty  = int(args.get("quantity", 0))
+                    _pending_orders[user_id] = {
+                        "action": act, "stock_code": code,
+                        "stock_name": name, "quantity": qty,
+                    }
+                    action_label = {"buy": "매수", "sell": "매도", "sellall": "전량 매도"}.get(act, act)
+                    qty_str = f"{qty}주 " if act != "sellall" else ""
+                    result = (
+                        f"⚠️ <b>{name}({code})</b> {qty_str}시장가 {action_label}\n"
+                        f"확인하시겠습니까? (예 / 아니오)"
+                    )
+                    logger.info("[GPT] 주문 제안: %s %s %s%s", act, code, qty_str, action_label)
+                elif tc.function.name == "get_yahoo_finance":
                     yt = args.get("ticker", "")
                     logger.info("[GPT] Yahoo Finance 조회 요청: %s", yt)
                     result = _call_yahoo_finance(yt)
@@ -346,6 +422,40 @@ Context Recall = (컨텍스트로 근거를 찾을 수 있는 답변 내 주장 
 def clear_history(user_id: int) -> None:
     """유저의 대화 기록 초기화."""
     _histories.pop(user_id, None)
+
+
+def _execute_trade_order(order: dict) -> str:
+    """확인된 주문을 KIS API로 실제 실행."""
+    from config import KIS_APP_KEY
+    action     = order["action"]
+    stock_code = order["stock_code"]
+    stock_name = order["stock_name"]
+    quantity   = order.get("quantity", 0)
+
+    if not KIS_APP_KEY:
+        return "⚠️ KIS_APP_KEY 미설정 — 시뮬레이션 모드에서는 실제 주문이 실행되지 않습니다."
+
+    try:
+        from trader import KISTrader
+        t = KISTrader()
+        if action == "buy":
+            t.buy(stock_code, quantity)
+            return f"✅ {stock_name}({stock_code}) {quantity}주 시장가 매수 주문 완료!"
+        elif action == "sell":
+            t.sell(stock_code, quantity)
+            return f"✅ {stock_name}({stock_code}) {quantity}주 시장가 매도 주문 완료!"
+        elif action == "sellall":
+            balance = t.get_balance()
+            holding = next((b for b in balance if b["stock_code"] == stock_code), None)
+            if not holding or holding["qty"] == 0:
+                return f"⚠️ {stock_name}({stock_code}) 보유 수량이 없습니다."
+            t.sell(stock_code, holding["qty"])
+            return f"✅ {stock_name}({stock_code}) {holding['qty']}주 전량 시장가 매도 주문 완료!"
+        else:
+            return f"⚠️ 알 수 없는 주문 유형: {action}"
+    except Exception as e:
+        logger.error("주문 실행 오류: %s", e)
+        return f"⚠️ 주문 실패: {e}"
 
 
 def _call_yahoo_finance(ticker: str) -> str:

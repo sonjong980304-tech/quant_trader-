@@ -16,35 +16,34 @@
 
 ### 매수 신호
 
-| 원칙 | 조건 |
-|------|------|
-| **1원칙** 5일선 단기 돌파 | 전일 종가 > MA5 AND 당일 시가 < MA5 AND 당일 종가 > MA5 + 양봉 |
-| **2원칙** MA5~MA20 사이 반등 | 종가가 MA5~MA20 사이 AND 예상 거래량 > 50일 평균 × 1.5배 AND 양봉 |
-| **3원칙** 거래량 급증 반등 | 예상 거래량 > 50일 평균 × 2.5배 AND (양봉 또는 도지형) |
-
-> 1원칙은 분봉 기반 장중 실시간 감지도 병행 (9:00~9:30 저가가 MA5 아래 + 시가 상향 돌파 + 거래량 조건)
+| 원칙 | 기반 | 조건 |
+|------|------|------|
+| **1원칙** 시가돌파 | 분봉 (장중 실시간) | 전일 종가 > MA5 AND 9:00~9:30 저가 < 시가 AND 9:30 이후 현재가 > 시가 돌파 AND 거래량 > 직전 5분봉 평균 × 1.5배 |
+| **2원칙** MA사이반등 | 일봉 | 전일 종가가 MA5~MA20 사이 AND 예상 거래량 > 50일 평균 × 1.5배 AND 양봉 |
+| **3원칙** MA20아래급등 | 일봉 | 전일 종가 < MA20 AND 예상 거래량 > 50일 평균 × 2.0배 AND (양봉 또는 도지) |
 
 ---
 
-### 매도 신호 (모두 전량 매도)
+### 매도 신호
 
-| 원칙 | 조건 |
-|------|------|
-| **1원칙** 급등 후 장대음봉 | 종가 > MA5 AND 예상 거래량 > 50일 평균 × 2.5배 AND 장대음봉 |
-| **2원칙** MA5~MA20 사이 이탈 | 종가가 MA5~MA20 사이 AND 예상 거래량 > 50일 평균 × 1.5배 AND 음봉 |
+| 원칙 | 실행 | 조건 |
+|------|------|------|
+| **1원칙** 급등 후 장대음봉 | 보유량 50% 매도 | 종가 > MA5 AND 예상 거래량 > 50일 평균 × 2.0배 AND 장대음봉 |
+| **2원칙** MA5~MA20 사이 이탈 | 전량 매도 | 종가가 MA5~MA20 사이 AND 예상 거래량 > 50일 평균 × 1.5배 AND 음봉 |
 
 ---
 
 ## 주문 규칙
 
-매수 신호 발생 시 **가용 현금의 40%** 한도로 시장가 매수.  
-1주 가격이 40%를 초과하는 경우 **1주** 매수.
+매수 신호 발생 시 **총 자산(현금 + 평가액)의 40%** 한도로 시장가 매수.  
+1주 가격이 40%를 초과하는 경우 **1주** 매수.  
+이미 보유 중인 종목은 추가 매수하지 않습니다.
 
 ---
 
 ## 분봉 거래량 급증 알림
 
-장중 분봉 거래량이 직전 5분봉 평균 대비 **2배 이상** 급증하면,  
+장중 분봉 거래량이 직전 5분봉 평균 대비 **3.5배 이상** 급증하면,  
 해당 종목의 네이버 최신 뉴스 3건을 자동으로 텔레그램으로 전송합니다.  
 동일 종목은 30분 이내 중복 알림을 차단합니다.
 
@@ -55,9 +54,6 @@
 매일 **15:00**에 전 종목의 기술적 분석 요약을 텔레그램으로 자동 전송합니다.
 
 ```
-📊 일일 기술적 분석 리포트
-2026-05-21 15:00 기준
-
 📈 삼성전자
 현재가: 75,000원  ▲1.23%
 MA5: 74,200 | MA20: 73,100 (우상향↗)
@@ -68,20 +64,49 @@ RSI: 58.3 | 캔들: 양봉
 포지션: 미보유
 ```
 
-종목당 1건씩 개별 메시지로 전송되며, 보유 중인 종목은 매수가와 현재 수익률도 표시됩니다.
+---
+
+## GPT AI 어시스턴트
+
+텔레그램에서 자연어로 질문하면 GPT-4.1이 자동으로 답변합니다.  
+재무·신호·뉴스가 필요한 경우 아래 툴을 자동 호출해 실시간 데이터를 기반으로 답변합니다.
+
+| 툴 | 용도 | 예시 질문 |
+|----|------|----------|
+| `get_naver_finance` | 한국 주식 재무지표 (PER, PBR, ROE 등) | "삼성전자 PER 얼마야?" |
+| `get_yahoo_finance` | 미국 주식 재무지표 + 연간 실적 시계열 | "NVDA 재무 보여줘" |
+| `get_stock_signal` | 매수/매도 원칙별 조건 충족 여부 분석 | "LG전자 왜 매수 안 됐어?" |
+| `get_naver_news` | 네이버 최신 뉴스 검색 | "현대차 요즘 이슈 뭐야?" |
+| `propose_trade` | 자연어 주문 → 2단계 확인 후 실행 | "현대모비스 1주 사줘" |
+
+툴을 사용한 답변에는 **Context Recall 점수**가 자동으로 표시됩니다 (서브에이전트 gpt-4.1-mini 평가).
+
+### 자연어 주문 흐름
+
+```
+사용자: "삼성전자 10주 사줘"
+  ↓
+GPT: ⚠️ 삼성전자(005930) 10주 시장가 매수
+     확인하시겠습니까? (예 / 아니오)
+  ↓
+사용자: "응"
+  ↓
+✅ 삼성전자(005930) 10주 시장가 매수 주문 완료!
+```
 
 ---
 
 ## 전체 아키텍처
 
 ```
-[ macOS launchd — 평일 09:00 자동 실행 ]
-                    │
-                    ▼
-         [ runner.py — 장중 매매 루프 ]          [ graph.py — LangGraph 에이전트 ]
-                    │                                         │
-         분봉 기반 실시간 매매                        일봉 기반 1회 실행
-         거래량 급증 시 뉴스 알림
+[ macOS launchd — 3개 데몬 상시 실행 ]
+        │
+        ├─ com.quant.trader.plist      → runner.py        (5분 간격 장중 자동매매)
+        ├─ com.quant.telegrambot.plist → telegram_bot.py  (사용자 인터페이스)
+        └─ com.quant.dashboard.plist  → dashboard.py      (Streamlit 모니터링)
+
+[ 수동 실행 ]
+        └─ graph.py  (LangGraph 단발성 에이전트, /run 명령어로 트리거)
 ```
 
 ---
@@ -103,15 +128,10 @@ RSI: 58.3 | 캔들: 양봉
 │           │                                                     │
 │        신호 없음? ──────────────────────────────► END           │
 │           │ 신호 있음                                           │
-│  [노드4] 리스크 체크                                             │
-│    └─ 당일 중복 신호 필터 / 연속 매수 과열 경고                   │
-│           │                                                     │
-│        중복/차단? ──────────────────────────────► END           │
-│           │ 통과                                                │
-│  [노드5] 알림 전송 + 주문 실행                                   │
+│  [노드4] 알림 전송 + 주문 실행                                   │
 │    └─ 텔레그램 알림 → KIS API 시장가 주문                        │
 │           │                                                     │
-│  [노드6] 로그 저장                                               │
+│  [노드5] 로그 저장                                               │
 │    └─ logs/trader.log (JSON 포맷, 5MB 롤링)                     │
 │           │                                                     │
 │          END                                                    │
@@ -127,7 +147,7 @@ TraderState {
     ohlcv         # OHLCV DataFrame (노드1~3에서 갱신)
     signal        # 최신 신호 딕셔너리 (close, MA5, MA20, RSI, volume...)
     signal_type   # "buy" / "sell_full" / "sell_partial" / "none"
-    risk_warning  # 과열 경고 메시지 (노드4)
+    log_entries   # 로그 항목 목록
     error         # 예외 메시지
 }
 ```
@@ -138,22 +158,23 @@ TraderState {
 
 ```
 quant_trader/
-├── config.py          # 전략 파라미터 / API 설정
-├── stocks.py          # 매매 종목 목록 (로컬 전용 — .gitignore)
-├── data_fetcher.py    # yfinance OHLCV 수집
-├── indicators.py      # MA / RSI / 거래량 시간 보정
-├── strategy.py        # 매수 1~3원칙 / 매도 1~2원칙 신호 생성
-├── news_fetcher.py    # 네이버 뉴스 수집
-├── graph.py           # LangGraph 6노드 에이전트
-├── runner.py          # 장중 분봉 기반 실시간 매매 루프
-├── trader.py          # KIS API 주문 / 잔고 / 포지션 관리
-├── backtest.py        # vectorbt 백테스트
-├── dashboard.py       # Streamlit 모니터링 대시보드
-├── notifier.py        # 텔레그램 알림 메시지 빌더
-├── telegram_bot.py    # 텔레그램 봇 명령 처리
-├── install.sh         # 자동 설치 스크립트
-├── com.quant.trader.plist     # launchd — 매매 루프
-├── com.quant.dashboard.plist  # launchd — 대시보드
+├── config.py           # 전략 파라미터 / API 설정
+├── data_fetcher.py     # yfinance 일봉 + KIS API 분봉 수집
+├── indicators.py       # MA / RSI / 거래량 시간 보정
+├── strategy.py         # 매수 1~3원칙 / 매도 1~2원칙 신호 생성
+├── trader.py           # KIS API 주문 / 잔고 / 포지션 관리
+├── notifier.py         # 텔레그램 알림 메시지 빌더
+├── news_fetcher.py     # 네이버 뉴스 API 수집
+├── naver_finance.py    # 네이버 증권 재무지표 스크래핑
+├── gpt_agent.py        # GPT-4.1 AI 어시스턴트 (툴 5종 + Context Recall 평가)
+├── graph.py            # LangGraph 5노드 에이전트
+├── runner.py           # 장중 분봉 기반 5분 간격 실시간 매매 루프
+├── telegram_bot.py     # 텔레그램 봇 (자연어 대화 + 명령어)
+├── backtest.py         # vectorbt 백테스트
+├── dashboard.py        # Streamlit 모니터링 대시보드
+├── install.sh          # 자동 설치 스크립트
+├── com.quant.trader.plist      # launchd — 매매 루프
+├── com.quant.dashboard.plist   # launchd — 대시보드
 ├── com.quant.telegrambot.plist # launchd — 텔레그램 봇
 ├── logs/
 │   └── trader.log
@@ -174,8 +195,7 @@ bash install.sh
 설치 스크립트가 다음을 자동 처리합니다:
 - Python 패키지 설치 (`requirements.txt`)
 - `.env` 파일 생성 및 API 키 입력 안내
-- macOS launchd 자동실행 등록 (매일 09:00)
-- `stocks.py` 템플릿 생성 (종목 목록 직접 입력)
+- macOS launchd 자동실행 등록
 
 ### 수동 설치
 
@@ -183,10 +203,6 @@ bash install.sh
 pip install -r requirements.txt
 cp .env.example .env
 # .env 파일에 API 키 입력
-
-# 종목 목록 설정 (stocks.py는 .gitignore에 포함)
-cp stocks.py.example stocks.py
-# stocks.py에서 STOCKS 딕셔너리에 종목 추가
 ```
 
 ---
@@ -235,10 +251,31 @@ streamlit run dashboard.py
 ```bash
 # 활성화
 launchctl load ~/Library/LaunchAgents/com.quant.trader.plist
+launchctl load ~/Library/LaunchAgents/com.quant.telegrambot.plist
 
 # 비활성화
 launchctl unload ~/Library/LaunchAgents/com.quant.trader.plist
+launchctl unload ~/Library/LaunchAgents/com.quant.telegrambot.plist
 ```
+
+---
+
+## 텔레그램 명령어
+
+| 명령어 | 설명 |
+|--------|------|
+| 자유 텍스트 | GPT AI 어시스턴트 자동 답변 |
+| `/ask <질문>` | GPT 명시적 질문 |
+| `/reset` | 대화 기록 초기화 |
+| `/status` | 전 종목 신호 조회 |
+| `/balance` | 계좌 잔고 조회 |
+| `/run` | LangGraph 에이전트 수동 실행 |
+| `/stocks` | 매매 종목 목록 |
+| `/addstock 코드 이름` | 종목 추가 |
+| `/removestock 코드` | 종목 삭제 |
+| `/buy 코드 수량` | 수동 매수 |
+| `/sell 코드 수량` | 수동 매도 |
+| `/sellall 코드` | 전량 매도 |
 
 ---
 
@@ -255,9 +292,10 @@ KIS_MOCK=false
 
 ## 주의사항
 
-1. `.env` 파일과 `stocks.py`는 절대 GitHub에 커밋하지 마세요.
+1. `.env` 파일은 절대 GitHub에 커밋하지 마세요.
 2. API 키 없이 실행 시 자동으로 시뮬레이션 모드로 동작합니다.
 3. 알고리즘 트레이딩은 예상치 못한 손실이 발생할 수 있습니다.
+4. 자연어 주문은 반드시 2단계 확인을 거쳐 실행됩니다.
 
 ---
 
