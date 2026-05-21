@@ -245,12 +245,12 @@ def run_priority_loop():
                         register_position(ticker, current_price, qty)
                         msg = build_buy_message(stock_name, sig, buy_principle)
                         send_telegram(msg)
-                        logger.info("  매수 실행: %s %d주 @ %,.0f원 (%s)",
-                                    stock_code, qty, current_price, buy_principle)
+                        logger.info("  매수 실행: %s %d주 @ %s원 (%s)",
+                                    stock_code, qty, f"{current_price:,.0f}", buy_principle)
                 else:
                     logger.info("  매수 신호(%s) — 자금 부족 또는 이미 보유", buy_principle)
 
-        logger.info("  완료: 현재가=%,.0f원", current_price)
+        logger.info("  완료: 현재가=%s원", f"{current_price:,.0f}")
 
     logger.info("\n매매 루프 종료")
 
