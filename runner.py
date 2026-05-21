@@ -256,13 +256,13 @@ def run_priority_loop():
 
 
 def main():
-    logger.info("스케줄러 시작 — 30분 간격 장중 실행")
+    logger.info("스케줄러 시작 — 5분 간격 장중 실행")
 
     times = []
     h, m = 9, 5
-    while (h, m) <= (15, 5):
+    while (h, m) <= (15, 25):
         times.append(f"{h:02d}:{m:02d}")
-        m += 30
+        m += 5
         if m >= 60:
             m -= 60
             h += 1
