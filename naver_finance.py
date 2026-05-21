@@ -22,6 +22,33 @@ _HEADERS = {
     "Accept-Language": "ko-KR,ko;q=0.9",
 }
 
+# STOCKS 목록에 없는 주요 종목 이름 → 6자리 코드 정적 매핑
+_WELL_KNOWN_STOCKS: dict[str, str] = {
+    "삼성전자": "005930", "SK하이닉스": "000660", "하이닉스": "000660",
+    "LG에너지솔루션": "373220", "삼성바이오로직스": "207940",
+    "현대차": "005380", "현대자동차": "005380", "기아": "000270",
+    "POSCO홀딩스": "005490", "포스코홀딩스": "005490", "포스코": "005490",
+    "셀트리온": "068270", "KB금융": "105560", "신한지주": "055550",
+    "삼성SDI": "006400", "LG화학": "051910",
+    "카카오": "035720", "NAVER": "035420", "네이버": "035420",
+    "삼성물산": "028260", "SK이노베이션": "096770",
+    "SK텔레콤": "017670", "KT": "030200", "한국전력": "015760",
+    "삼성생명": "032830", "삼성화재": "000810",
+    "우리금융지주": "316140", "메리츠금융지주": "138040",
+    "롯데케미칼": "011170", "현대건설": "000720",
+    "삼성전기": "009150", "LG디스플레이": "034220",
+    "SK": "034730", "LG": "003550",
+    "현대글로비스": "086280", "포스코퓨처엠": "003670",
+    "HD현대중공업": "329180", "현대제철": "004020",
+    "한국항공우주": "047810", "한국항공우주산업": "047810",
+    "대한항공": "003490", "에쓰오일": "010950",
+    "한화에어로스페이스": "012450", "한화솔루션": "009830",
+    "크래프톤": "259960", "카카오뱅크": "323410", "카카오페이": "377300",
+    "고려아연": "010130", "포스코인터내셔널": "047050",
+    "HD현대": "267250", "두산밥캣": "241560",
+    "현대해상": "001450", "DB손해보험": "005830",
+}
+
 # 우선 출력할 지표 순서
 _PRIORITY = [
     "현재주가",
@@ -45,12 +72,17 @@ def _resolve_code(identifier: str) -> tuple[str, str]:
 
     clean = identifier.replace(".KS", "").replace(".KQ", "").strip()
 
+    # 1. STOCKS 딕셔너리에서 탐색
     for ticker, name in STOCKS.items():
         code = ticker.replace(".KS", "").replace(".KQ", "")
         if identifier.strip() in (ticker, code, name) or clean in (code, name):
             return code, name
 
-    # identifier 자체가 6자리 숫자 코드인 경우
+    # 2. 정적 well-known 종목 매핑에서 탐색
+    if clean in _WELL_KNOWN_STOCKS:
+        return _WELL_KNOWN_STOCKS[clean], clean
+
+    # 3. identifier 자체가 6자리 숫자 코드인 경우
     if clean.isdigit() and len(clean) == 6:
         return clean, clean
 
@@ -180,6 +212,52 @@ def _scrape_coinfo(code: str) -> dict:
     return result
 
 
+def _scrape_wisereport(code: str) -> dict:
+    """wisereport에서 연도별 주요지표(PER/PBR/EPS/BPS 등) 파싱."""
+    url = f"https://navercomp.wisereport.co.kr/v2/company/c1010001.aspx?cmp_cd={code}"
+    try:
+        resp = requests.get(url, headers=_HEADERS, timeout=10)
+        resp.raise_for_status()
+    except Exception as e:
+        logger.warning("wisereport 조회 실패 (%s): %s", code, e)
+        return {}
+
+    soup = BeautifulSoup(resp.text, "html.parser")
+    tables = soup.select("table")
+    result: dict[str, str] = {}
+
+    # table[1] — 주가/시가총액 기본 정보
+    if len(tables) > 1:
+        for row in tables[1].select("tr"):
+            cells = row.select("td,th")
+            if len(cells) >= 2:
+                key = cells[0].get_text(strip=True)
+                val = cells[1].get_text(strip=True)
+                if key and val and val not in ("-", ""):
+                    result.setdefault(key, val)
+
+    # table[5] — 연도별 주요지표 (PER, PBR, EPS, BPS 등)
+    if len(tables) > 5:
+        rows = tables[5].select("tr")
+        if rows:
+            header_cells = rows[0].select("th,td")
+            years = [c.get_text(strip=True) for c in header_cells[1:]]
+            for row in rows[1:]:
+                cells = row.select("th,td")
+                if not cells:
+                    continue
+                metric = cells[0].get_text(strip=True)
+                if not metric:
+                    continue
+                for i, year in enumerate(years):
+                    if i + 1 < len(cells):
+                        val = cells[i + 1].get_text(strip=True)
+                        if val and val not in ("-", "N/A", ""):
+                            result[f"{metric}({year})"] = val
+
+    return result
+
+
 def get_financials(identifier: str) -> str:
     """
     종목명 또는 코드를 받아 Naver Finance 재무지표를 텍스트로 반환.
@@ -194,9 +272,12 @@ def get_financials(identifier: str) -> str:
 
     label = f"{name} ({code})" if name and name != code else code
 
-    main_data  = _scrape_main(code)
+    main_data   = _scrape_main(code)
     coinfo_data = _scrape_coinfo(code)
-    merged = {**coinfo_data, **main_data}   # main_data 우선
+    wise_data   = _scrape_wisereport(code)
+    # 우선순위: coinfo < wisereport < main (현재가/당일 데이터는 main이 최신)
+    # wisereport의 연도별 라벨 키(EPS(2026/12(E)) 등)는 main에 없으므로 보존됨
+    merged = {**coinfo_data, **wise_data, **main_data}
 
     if not merged:
         return f"{label} 재무정보 조회 실패 — Naver Finance 연결 오류"
@@ -204,7 +285,15 @@ def get_financials(identifier: str) -> str:
     lines = [f"[{label} — Naver Finance 재무지표]"]
     seen: set[str] = set()
 
-    # 우선순위 지표 먼저 출력
+    # wisereport 연도별 지표를 최상단에 먼저 출력 (GPT가 연도별 EPS 혼동 방지)
+    year_keys = [(k, v) for k, v in wise_data.items() if re.search(r"\d{4}/\d{2}\(", k)]
+    if year_keys:
+        lines.append("  ── 연도별 주요지표 (wisereport) ──")
+        for k, v in year_keys:
+            lines.append(f"  {k}: {v}")
+            seen.add(k)
+
+    # 우선순위 지표
     for pkey in _PRIORITY:
         for k, v in merged.items():
             if pkey in k and k not in seen:
