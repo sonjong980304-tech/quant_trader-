@@ -73,7 +73,8 @@ RSI: 58.3 | 캔들: 양봉
 
 | 툴 | 용도 | 예시 질문 |
 |----|------|----------|
-| `get_naver_finance` | 한국 주식 재무지표 (PER, PBR, ROE 등) | "삼성전자 PER 얼마야?" |
+| `get_naver_finance` | 한국 주식 재무지표 + 현재주가 (PER, PBR, EPS, 연도별 예상치 포함) | "삼성전자 26년 예상 EPS 기준 PER 계산해줘" |
+| `get_historical_price` | 특정 날짜 종목 종가 조회 | "삼성전자 26년 5월 18일 주가 알려줘" |
 | `get_yahoo_finance` | 미국 주식 재무지표 + 연간 실적 시계열 | "NVDA 재무 보여줘" |
 | `get_stock_signal` | 매수/매도 원칙별 조건 충족 여부 분석 | "LG전자 왜 매수 안 됐어?" |
 | `get_naver_news` | 네이버 최신 뉴스 검색 | "현대차 요즘 이슈 뭐야?" |
@@ -132,7 +133,8 @@ GPT: ⚠️ 삼성전자(005930) 10주 시장가 매수
          │    │  툴 자동 호출                                              │
          │    │  ├─ get_stock_signal ──▶ fetch_ohlcv + generate_signals  │
          │    │  │                       (runner.py와 동일 파이프라인)      │
-         │    │  ├─ get_naver_finance ─▶ naver_finance.py (스크래핑)      │
+         │    │  ├─ get_naver_finance ─▶ naver_finance.py (현재주가+연도별EPS) │
+         │    │  ├─ get_historical_price ▶ yfinance (특정날짜 종가)        │
          │    │  ├─ get_yahoo_finance ─▶ yfinance (미국 주식)              │
          │    │  ├─ get_naver_news ───▶ news_fetcher.py (네이버 API)      │
          │    │  ├─ propose_trade ────▶ KIS API 실제 주문 (2단계 확인)     │

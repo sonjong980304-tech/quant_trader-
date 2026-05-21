@@ -225,6 +225,31 @@ _TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_historical_price",
+            "description": (
+                "특정 날짜의 종목 종가를 조회합니다. "
+                "'삼성전자 2026년 5월 18일 주가', '작년 12월 31일 카카오 주가' 같은 질문에 사용하세요. "
+                "오늘 현재주가는 get_naver_finance를 사용하세요."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "identifier": {
+                        "type": "string",
+                        "description": "종목명(예: '삼성전자') 또는 6자리 종목코드(예: '005930')",
+                    },
+                    "date": {
+                        "type": "string",
+                        "description": "조회할 날짜. 'YYYY-MM-DD', 'YY년 M월 D일', 'YYYY.MM.DD' 형식 모두 가능",
+                    },
+                },
+                "required": ["identifier", "date"],
+            },
+        },
+    },
 ]
 
 
@@ -278,13 +303,18 @@ def _build_system_prompt() -> str:
 답변은 반드시 한국어로 하세요.
 
 ━━━ 툴 사용 규칙 ━━━
-- 실시간 재무 수치(PER, 영업이익 등) 한국 주식 → get_naver_finance
+- 실시간 재무 수치(PER, EPS 등) + 현재주가 한국 주식 → get_naver_finance
 - 실시간 재무 수치 미국 주식 → get_yahoo_finance
+- 특정 날짜의 과거 주가 조회 → get_historical_price
 - 종목 신호/원칙 분석 → get_stock_signal
 - 뉴스 검색 → get_naver_news
 - 이미 알고 있는 정보(전략, 원칙, 파라미터)는 툴 없이 바로 답변
 - 사용자가 매수/매도/전량매도를 명시적으로 요청하면 반드시 propose_trade 툴을 호출하세요.
   텍스트로만 확인을 묻지 말고 반드시 툴을 호출해야 합니다.
+- "현재주가 기준 PER/PBR 계산" 요청 시: get_naver_finance 호출 후 반환된 현재주가와
+  EPS/BPS 수치로 직접 계산하세요 (PER = 현재주가 ÷ EPS, PBR = 현재주가 ÷ BPS).
+  네이버 사전계산 PER/PBR을 그대로 반환하지 마세요.
+- 특정 연도 예상EPS 기반 계산 시: 연도가 명시된 항목(예: EPS(2026/12(E)))을 사용하세요.
 
 ━━━ 매매 전략 원칙 ━━━
 
@@ -419,6 +449,10 @@ def ask(user_id: int, question: str) -> str:
                 elif tc.function.name == "get_naver_finance":
                     logger.info("[GPT] Naver Finance 조회 요청: %s", identifier)
                     result = _call_naver_finance(identifier)
+                elif tc.function.name == "get_historical_price":
+                    date_arg = args.get("date", "")
+                    logger.info("[GPT] 과거 주가 조회 요청: %s %s", identifier, date_arg)
+                    result = _call_historical_price(identifier, date_arg)
                 elif tc.function.name == "get_stock_signal":
                     logger.info("[GPT] 종목 신호 분석 요청: %s", identifier)
                     result = _call_stock_signal(identifier)
@@ -734,6 +768,72 @@ def _call_naver_finance(identifier: str) -> str:
     except Exception as e:
         logger.error("Naver Finance 툴 오류: %s", e)
         return f"Naver Finance 조회 오류: {e}"
+
+
+def _parse_korean_date(date_str: str):
+    """한국어/일반 날짜 문자열 → datetime.date. 실패 시 None."""
+    import re
+    from datetime import date
+    s = date_str.strip()
+    for pattern, fmt in [
+        (r"(\d{4})-(\d{1,2})-(\d{1,2})", lambda m: date(int(m[1]), int(m[2]), int(m[3]))),
+        (r"(\d{4})\.(\d{1,2})\.(\d{1,2})", lambda m: date(int(m[1]), int(m[2]), int(m[3]))),
+        (r"(\d{2,4})년\s*(\d{1,2})월\s*(\d{1,2})일", lambda m: date(int(m[1]) if int(m[1]) > 100 else 2000 + int(m[1]), int(m[2]), int(m[3]))),
+        (r"(\d{8})", lambda m: date(int(m[1][:4]), int(m[1][4:6]), int(m[1][6:8]))),
+    ]:
+        match = re.search(pattern, s)
+        if match:
+            try:
+                return fmt(match)
+            except ValueError:
+                continue
+    return None
+
+
+def _call_historical_price(identifier: str, date: str) -> str:
+    try:
+        import yfinance as yf
+        import pandas as pd
+        from datetime import timedelta
+        from naver_finance import _resolve_code
+
+        code, name = _resolve_code(identifier)
+        if not code:
+            return f"'{identifier}' 종목을 찾을 수 없습니다."
+
+        target = _parse_korean_date(date)
+        if not target:
+            return f"날짜 형식을 인식할 수 없습니다: {date}\n'YYYY-MM-DD' 또는 'YY년 M월 D일' 형식으로 입력하세요."
+
+        label = name or code
+        start = (target - timedelta(days=7)).strftime("%Y-%m-%d")
+        end   = (target + timedelta(days=7)).strftime("%Y-%m-%d")
+
+        ticker = f"{code}.KS"
+        df = yf.download(ticker, start=start, end=end, auto_adjust=True, progress=False)
+        if df.empty:
+            ticker = f"{code}.KQ"
+            df = yf.download(ticker, start=start, end=end, auto_adjust=True, progress=False)
+        if df.empty:
+            return f"{label} {date} 주가 데이터를 가져올 수 없습니다."
+
+        df.index = pd.to_datetime(df.index).normalize()
+        target_ts = pd.Timestamp(target)
+
+        if target_ts in df.index:
+            close = float(df.loc[target_ts, "Close"].iloc[0] if hasattr(df.loc[target_ts, "Close"], "iloc") else df.loc[target_ts, "Close"])
+            return f"{label} {target.strftime('%Y-%m-%d')} 종가: {close:,.0f}원"
+
+        past = df[df.index <= target_ts]
+        row_ts = past.index[-1] if not past.empty else df.index[0]
+        close = float(df.loc[row_ts, "Close"].iloc[0] if hasattr(df.loc[row_ts, "Close"], "iloc") else df.loc[row_ts, "Close"])
+        return (
+            f"{label} {row_ts.strftime('%Y-%m-%d')} 종가: {close:,.0f}원"
+            f" (요청일 {target.strftime('%Y-%m-%d')} 기준 가장 가까운 거래일)"
+        )
+    except Exception as e:
+        logger.error("과거 주가 조회 오류: %s", e)
+        return f"과거 주가 조회 오류: {e}"
 
 
 def _call_stock_signal(identifier: str) -> str:
