@@ -1,14 +1,14 @@
 """
 strategy.py - 매수/매도 신호 생성
-5일/20일 이동평균선 + 거래량 + 캔들 타입 + MA20 방향 필터 기반 전략
+5일/20일 이동평균선 + 거래량 + 캔들 타입 기반 전략
 """
 
 import pandas as pd
 from config import (
-    MA_SHORT, MA_LONG, MA20_RISING_LOOKBACK,
+    MA_SHORT, MA_LONG,
     VOLUME_INCREASE_RATIO, VOLUME_SURGE_RATIO,
     VOLUME_LOOKBACK_DAYS, DOJI_THRESHOLD,
-    LARGE_CANDLE_MULTIPLIER, PULLBACK_DAYS,
+    LARGE_CANDLE_MULTIPLIER,
 )
 
 
@@ -104,59 +104,51 @@ def _bearish_n_days(df: pd.DataFrame, n: int) -> pd.Series:
     return result
 
 
-def _ma20_rising_series(df: pd.DataFrame) -> pd.Series:
-    """
-    MA20 우상향 판단 (Series 버전 — 백테스트/신호 생성용).
-    ma20[t] > ma20[t - MA20_RISING_LOOKBACK] 이면 True.
-    """
-    ma20_col = f"MA_{MA_LONG}"
-    return df[ma20_col] > df[ma20_col].shift(MA20_RISING_LOOKBACK)
-
-
 # ─────────────────────────────────────────────
 # 매수 신호 (일봉 기반)
 # ─────────────────────────────────────────────
 
 def buy_signal_1(df: pd.DataFrame) -> pd.Series:
     """
-    매수 1원칙: 5일선 위 단기 돌파
-    - 전일 종가 > MA5 (5일선 위에 있는 상태)
-    - 당일 시가 < MA5 (5일선 아래로 하락 출발)
-    - 당일 종가 > MA5 + 양봉 (5일선 위로 재돌파)
+    매수 1원칙: 전일 종가 MA5 위 + 당일 시가 아래 하락 후 시가 재돌파 (일봉 근사)
+    - 전일 종가 > MA5
+    - 당일 저가 < 당일 시가 (장중 시가 아래로 하락)
+    - 당일 종가 > 당일 시가 (시가 상향 돌파)
     """
     ma5 = f"MA_{MA_SHORT}"
     return (
         (df["Close"].shift(1) > df[ma5].shift(1)) &
-        (df["Open"] < df[ma5]) &
-        _is_bullish(df) &
-        (df["Close"] > df[ma5])
+        (df["Low"] < df["Open"]) &
+        (df["Close"] > df["Open"])
     )
 
 
 def buy_signal_2(df: pd.DataFrame) -> pd.Series:
     """
     매수 2원칙: 5~20일선 사이 반등
-    - 종가가 MA5와 MA20 사이
-    - 오늘 거래량 증가 + 양봉
+    - 전일 종가가 MA5와 MA20 사이 (위치 조건)
+    - 오늘 거래량 증가 + 양봉 (당일 행동 조건)
     """
     ma5  = f"MA_{MA_SHORT}"
     ma20 = f"MA_{MA_LONG}"
     ma_min = df[[ma5, ma20]].min(axis=1)
     ma_max = df[[ma5, ma20]].max(axis=1)
 
-    between_mas    = (df["Close"] > ma_min) & (df["Close"] < ma_max)
+    prev_between   = (df["Close"].shift(1) > ma_min) & (df["Close"].shift(1) < ma_max)
     today_reversal = _vol_increase(df) & _is_bullish(df)
 
-    return between_mas & today_reversal
+    return prev_between & today_reversal
 
 
 def buy_signal_3(df: pd.DataFrame) -> pd.Series:
     """
-    매수 3원칙: 거래량 급증 반등
-    - 거래량 급증
-    - 양봉 또는 도지형 캔들
+    매수 3원칙: 20일선 아래 거래량 급증 반등
+    - 전일 종가 < MA20 (위치 조건)
+    - 오늘 거래량 급증 + 양봉 또는 도지 (당일 행동 조건)
     """
+    ma20 = f"MA_{MA_LONG}"
     return (
+        (df["Close"].shift(1) < df[ma20]) &
         _vol_surge(df) &
         (_is_bullish(df) | _is_doji(df))
     )
@@ -168,7 +160,7 @@ def buy_signal_3(df: pd.DataFrame) -> pd.Series:
 
 def sell_signal_1(df: pd.DataFrame) -> pd.Series:
     """
-    매도 1원칙: 5일선 위 급등 후 장대음봉
+    매도 1원칙: 5일선 위 급등 후 장대음봉 → 부분매도
     - 종가 > MA5
     - 거래량 급증 + 장대음봉
     """
@@ -182,7 +174,7 @@ def sell_signal_1(df: pd.DataFrame) -> pd.Series:
 
 def sell_signal_2(df: pd.DataFrame) -> pd.Series:
     """
-    매도 2원칙: 5~20일선 사이 거래량 증가 음봉
+    매도 2원칙: 5~20일선 사이 거래량 증가 음봉 → 전량매도
     - 종가가 MA5와 MA20 사이
     - 거래량 증가 + 음봉
     """
@@ -208,21 +200,23 @@ def buy_signal_1_intraday(ticker: str, minute_df: pd.DataFrame, daily_df: pd.Dat
     분봉 기반 매수 1원칙 (runner.py 장중 실행 전용).
 
     조건:
-      1. 현재가 > 5일 이동평균선 (일봉 기준)
-      2. 9:00~9:30 사이 저가가 5일선 아래로 내려간 적 있을 것
-      3. 현재가가 장 시작 시가(9:00 첫 캔들 open)를 상향 돌파
+      1. 전일 종가 > MA5 (일봉 기준)
+      2. 9:00~9:30 사이에 저가가 장 시작 시가(open_price) 아래로 내려간 적 있을 것
+      3. 9:30 이후 현재가가 장 시작 시가를 상향 돌파 (직전 캔들 ≤ 시가 < 현재 캔들)
       4. 돌파 캔들 거래량 > 직전 5분봉 평균거래량 × VOLUME_INCREASE_RATIO
     """
-
     if minute_df.empty or daily_df.empty:
         return False
 
+    # 1. 전일 종가 > MA5
     ma5_col   = f"MA_{MA_SHORT}"
-    ma5_value = float(daily_df[ma5_col].iloc[-1])
+    try:
+        prev_close = float(daily_df["Close"].iloc[-2])
+        ma5_value  = float(daily_df[ma5_col].iloc[-2])
+    except (IndexError, KeyError):
+        return False
 
-    # 2. 현재가 > MA5
-    current_price = float(minute_df["close"].iloc[-1])
-    if current_price <= ma5_value:
+    if prev_close <= ma5_value:
         return False
 
     # 분봉 인덱스 DatetimeIndex 보장
@@ -230,7 +224,9 @@ def buy_signal_1_intraday(ticker: str, minute_df: pd.DataFrame, daily_df: pd.Dat
         minute_df = minute_df.copy()
         minute_df.index = pd.to_datetime(minute_df.index)
 
-    # 3. 9:00~9:30 구간에 저가가 MA5 아래로 내려간 적 있는지
+    open_price = float(minute_df["open"].iloc[0])   # 9:00 첫 캔들 시가
+
+    # 2. 9:00~9:30 구간에 저가가 시가 아래로 내려간 적 있는지
     try:
         early_df = minute_df.between_time("09:00", "09:30")
     except Exception:
@@ -239,21 +235,31 @@ def buy_signal_1_intraday(ticker: str, minute_df: pd.DataFrame, daily_df: pd.Dat
     if early_df.empty:
         return False
 
-    if not (early_df["low"] < ma5_value).any():
+    if not (early_df["low"] < open_price).any():
         return False
 
-    # 4. 현재 캔들이 장 시작 시가를 상향 돌파
+    # 3. 9:30 이후에만 돌파 체크 (9:30 이전엔 신호 미발동)
+    try:
+        import pytz
+        kst = pytz.timezone("Asia/Seoul")
+        from datetime import datetime as _dt
+        now_kst = _dt.now(kst)
+        if now_kst.hour < 9 or (now_kst.hour == 9 and now_kst.minute < 30):
+            return False
+    except Exception:
+        pass
+
+    # 현재 캔들이 장 시작 시가를 상향 돌파 (직전 ≤ 시가 < 현재)
     if len(minute_df) < 2:
         return False
 
-    open_price    = float(minute_df["open"].iloc[0])   # 9:00 첫 캔들 시가
-    prev_close    = float(minute_df["close"].iloc[-2])
-    current_close = float(minute_df["close"].iloc[-1])
+    prev_close_min = float(minute_df["close"].iloc[-2])
+    current_close  = float(minute_df["close"].iloc[-1])
 
-    if not (prev_close <= open_price < current_close):
+    if not (prev_close_min <= open_price < current_close):
         return False
 
-    # 5. 거래량 조건: 현재 캔들 거래량 > 직전 5분봉 평균 × VOLUME_INCREASE_RATIO
+    # 4. 거래량 조건: 현재 캔들 거래량 > 직전 5분봉 평균 × VOLUME_INCREASE_RATIO
     if len(minute_df) < 6:
         return False
 
@@ -273,13 +279,12 @@ def buy_signal_1_intraday(ticker: str, minute_df: pd.DataFrame, daily_df: pd.Dat
 def generate_signals(df: pd.DataFrame, strategy: dict = None) -> pd.DataFrame:
     """
     전략 신호 컬럼 생성.
-    strategy 파라미터는 하위 호환성을 위해 유지하되 무시됨.
 
     추가 컬럼:
       buy_signal_1/2/3, sell_signal_1/2
       buy_signal    : 매수 1~3원칙 중 하나라도 해당
-      sell_full     : 매도 1원칙 (즉시 전량 매도)
-      sell_partial  : 매도 2원칙 (분할 매도)
+      sell_partial  : 매도 1원칙 (부분매도)
+      sell_full     : 매도 2원칙 (전량매도)
     """
     df = df.copy()
 
@@ -290,8 +295,8 @@ def generate_signals(df: pd.DataFrame, strategy: dict = None) -> pd.DataFrame:
     df["sell_signal_2"] = sell_signal_2(df)
 
     df["buy_signal"]   = df["buy_signal_1"] | df["buy_signal_2"] | df["buy_signal_3"]
-    df["sell_full"]    = df["sell_signal_1"] | df["sell_signal_2"]
-    df["sell_partial"] = pd.Series(False, index=df.index)
+    df["sell_partial"] = df["sell_signal_1"]   # 1원칙 → 부분매도
+    df["sell_full"]    = df["sell_signal_2"]   # 2원칙 → 전량매도
 
     return df
 
@@ -306,8 +311,8 @@ def get_latest_signal(df: pd.DataFrame) -> dict:
     if last.get("buy_signal_3", False):  buy_which.append("3원칙")
 
     sell_which = []
-    if last.get("sell_signal_1", False): sell_which.append("1원칙")
-    if last.get("sell_signal_2", False): sell_which.append("2원칙")
+    if last.get("sell_signal_1", False): sell_which.append("1원칙(부분)")
+    if last.get("sell_signal_2", False): sell_which.append("2원칙(전량)")
 
     return {
         "buy":          bool(last.get("buy_signal", False)),
@@ -342,5 +347,5 @@ if __name__ == "__main__":
     print(f"  매수(1원칙): {df['buy_signal_1'].sum()}건")
     print(f"  매수(2원칙): {df['buy_signal_2'].sum()}건")
     print(f"  매수(3원칙): {df['buy_signal_3'].sum()}건")
-    print(f"  매도(1원칙): {df['sell_signal_1'].sum()}건")
-    print(f"  매도(2원칙): {df['sell_signal_2'].sum()}건")
+    print(f"  매도(1원칙-부분): {df['sell_signal_1'].sum()}건")
+    print(f"  매도(2원칙-전량): {df['sell_signal_2'].sum()}건")
