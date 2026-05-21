@@ -5,7 +5,10 @@ notifier.py - 텔레그램 알림 전송
 import logging
 import requests
 
-from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+from config import (
+    TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
+    MA_LONG, MA20_RISING_LOOKBACK, VOLUME_LOOKBACK_DAYS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +65,82 @@ def build_sell_partial_message(stock_name: str, signal: dict, reason: str = "") 
         f"5~20일선 사이 거래량 증가 + 음봉 | 현재가: {signal.get('close', 0):,.0f}원\n"
         f"MA5: {signal['ma_short']:,.0f} | MA20: {signal['ma_long']:,.0f}"
         f"{reason_line}"
+    )
+
+
+def build_daily_summary_message(
+    stock_name: str,
+    sig: dict,
+    daily_df,
+    position: dict = None,
+) -> str:
+    """오후 3시 일일 기술적 분석 리포트 — 종목 1건 메시지"""
+    close  = sig["close"]
+    ma5    = sig["ma_short"]
+    ma20   = sig["ma_long"]
+    rsi    = sig["rsi"]
+    volume = sig["volume"]
+
+    # 전일 대비 등락
+    prev_close = float(daily_df["Close"].iloc[-2]) if len(daily_df) >= 2 else close
+    change_pct = (close - prev_close) / prev_close * 100 if prev_close > 0 else 0
+    change_icon = "▲" if change_pct >= 0 else "▼"
+
+    # 현재가 vs MA 위치
+    pos_ma5  = "위" if close > ma5  else "아래"
+    pos_ma20 = "위" if close > ma20 else "아래"
+
+    # MA20 방향 (MA20_RISING_LOOKBACK일 전과 비교)
+    ma20_col = f"MA_{MA_LONG}"
+    if ma20_col in daily_df.columns and len(daily_df) > MA20_RISING_LOOKBACK:
+        ma20_rising = float(daily_df[ma20_col].iloc[-1]) > float(daily_df[ma20_col].iloc[-1 - MA20_RISING_LOOKBACK])
+    else:
+        ma20_rising = False
+    ma20_dir = "우상향↗" if ma20_rising else "우하향↘"
+
+    # 거래량 vs 50일 평균
+    vol_avg = float(
+        daily_df["Volume"].rolling(window=VOLUME_LOOKBACK_DAYS, min_periods=1).mean().shift(1).iloc[-1]
+    )
+    vol_ratio = volume / vol_avg if vol_avg > 0 else 0
+
+    # 캔들 타입
+    open_price = float(daily_df["Open"].iloc[-1])
+    if close > open_price:
+        candle = "양봉"
+    elif close < open_price:
+        candle = "음봉"
+    else:
+        candle = "도지"
+
+    # 매수/매도 신호
+    buy_which  = sig.get("buy_which", [])
+    sell_which = sig.get("sell_which", [])
+    if buy_which:
+        signal_str = f"🟢 매수 ({'/'.join(buy_which)})"
+    elif sell_which:
+        signal_str = f"🔴 매도 ({'/'.join(sell_which)})"
+    else:
+        signal_str = "─ 없음"
+
+    # 보유 현황
+    if position:
+        avg_price  = position.get("avg_price", 0)
+        profit_pct = (close - avg_price) / avg_price * 100 if avg_price > 0 else 0
+        p_icon     = "▲" if profit_pct >= 0 else "▼"
+        hold_str   = f"보유중 | 매수가 {avg_price:,.0f}원 | 수익률 {p_icon}{abs(profit_pct):.1f}%"
+    else:
+        hold_str = "미보유"
+
+    return (
+        f"<b>📈 {stock_name}</b>\n"
+        f"현재가: {close:,.0f}원  {change_icon}{abs(change_pct):.2f}%\n"
+        f"MA5: {ma5:,.0f} | MA20: {ma20:,.0f} ({ma20_dir})\n"
+        f"위치: MA5 {pos_ma5} / MA20 {pos_ma20}\n"
+        f"RSI: {rsi} | 캔들: {candle}\n"
+        f"거래량: {vol_ratio:.1f}배 ({VOLUME_LOOKBACK_DAYS}일 평균 대비)\n"
+        f"신호: {signal_str}\n"
+        f"포지션: {hold_str}"
     )
 
 
