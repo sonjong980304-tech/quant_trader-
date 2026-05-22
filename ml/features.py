@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 features.py - XGBoost 모델용 피처 엔지니어링
 
@@ -37,6 +39,8 @@ def add_features(
     입력 df 컬럼: Open, High, Low, Close, Volume
     """
     df = df.copy()
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
 
     # ── 기본 수익률 / 거래량 ──────────────────────────
     df["change_rate"]    = df["Close"].pct_change()

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 safe_portfolio.py - 안전자산 70% 포트폴리오 관리
 

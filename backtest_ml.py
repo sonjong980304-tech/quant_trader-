@@ -1,19 +1,24 @@
 """
-backtest_ml.py - 최근 1개월 ML 전략 백테스트
+backtest_ml.py - 분봉 기반 45일 ML 전략 백테스트
 
 흐름:
-  1. 관심종목 데이터 다운로드 (1년치 → 마지막 1달 테스트셋으로 사용)
-  2. 1달 이전 데이터로 XGBoost 모델 학습
-  3. 마지막 1달: 매일 트리거 감지 + ML 예측 → 신호 발생 시 가상 매수
-  4. 7일 후 청산, 손익 기록
-  5. 결과 요약 (승률, 손익비, 누적 수익률)
+  1. 5분봉 60일치 다운로드 (yfinance)
+  2. 45일 이전 일봉 5년치로 XGBoost 모델 학습
+  3. 45일 구간: 분봉마다 오늘 일봉 바 합성 → 트리거 감지 → ML 예측
+  4. 신호 발생 시 다음 봉 시가에 가상 매수 (하루 1건)
+  5. 7거래일 후 일봉 종가로 청산
+  6. 결과 요약 (승률, 손익비, 평균 수익률)
 
 실행:
   python backtest_ml.py
   또는 텔레그램 /backtest 명령
 """
 
+from __future__ import annotations
+
 import logging
+import os
+import pickle
 import warnings
 from datetime import date, timedelta
 from dateutil.relativedelta import relativedelta
@@ -26,129 +31,171 @@ warnings.filterwarnings("ignore")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 logger = logging.getLogger(__name__)
 
-HORIZON       = 7      # 청산 기간 (일)
+HORIZON       = 7      # 청산 기간 (거래일)
 WIN_THRESHOLD = 0.03   # 성공 기준 (3%)
 MIN_WIN_PROB  = 0.55
 MIN_RR        = 1.5
+TEST_DAYS     = 45     # 백테스트 테스트 구간 (일)
 
 
 # ─────────────────────────────────────────────
 # 데이터
 # ─────────────────────────────────────────────
 
-def _fetch(ticker: str, years: int = 2) -> pd.DataFrame:
+def _fetch_daily(ticker: str, years: int = 5) -> pd.DataFrame:
+    """일봉 데이터 (ML 학습용)."""
     end   = date.today()
     start = end - relativedelta(years=years)
     df    = yf.download(ticker, start=str(start), end=str(end),
                         auto_adjust=True, progress=False)
-    df    = df[["Open", "High", "Low", "Close", "Volume"]].dropna()
-    return df
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+    return df[["Open", "High", "Low", "Close", "Volume"]].dropna()
+
+
+def _fetch_intraday(ticker: str) -> pd.DataFrame:
+    """5분봉 60일치 (yfinance 최대 제공 범위)."""
+    df = yf.download(ticker, period="60d", interval="5m",
+                     auto_adjust=True, progress=False)
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+    return df[["Open", "High", "Low", "Close", "Volume"]].dropna()
 
 
 # ─────────────────────────────────────────────
-# 백테스트 엔진
+# 분봉 기반 백테스트 엔진
 # ─────────────────────────────────────────────
 
 def backtest_ticker(ticker: str, name: str) -> dict | None:
-    """단일 종목 1개월 백테스트. 결과 dict 반환."""
+    """단일 종목 분봉 기반 45일 백테스트."""
     logger.info("  [%s] 데이터 수집 중...", ticker)
+
     try:
-        df = _fetch(ticker, years=2)
+        df_min = _fetch_intraday(ticker)
     except Exception as e:
-        logger.warning("  [%s] 데이터 오류: %s", ticker, e)
+        logger.warning("  [%s] 분봉 오류: %s", ticker, e)
         return None
 
-    if len(df) < 120:
-        logger.warning("  [%s] 데이터 부족: %d행", ticker, len(df))
+    if df_min.empty or len(df_min) < 50:
+        logger.warning("  [%s] 분봉 데이터 부족", ticker)
         return None
 
-    # train / test 분리 (마지막 1개월 = test)
-    cutoff    = date.today() - relativedelta(months=1)
-    train_df  = df[df.index.date < cutoff]
-    test_df   = df[df.index.date >= cutoff]
-
-    if len(train_df) < 60 or len(test_df) < 5:
-        logger.warning("  [%s] train/test 분량 부족", ticker)
+    try:
+        df_daily = _fetch_daily(ticker)
+    except Exception as e:
+        logger.warning("  [%s] 일봉 오류: %s", ticker, e)
         return None
 
-    # 모델 학습 (train 구간)
+    if len(df_daily) < 120:
+        return None
+
+    # cutoff: 45일 전 → 이전 일봉으로 ML 학습
+    cutoff   = date.today() - timedelta(days=TEST_DAYS)
+    train_df = df_daily[df_daily.index.date < cutoff]
+
+    if len(train_df) < 60:
+        logger.warning("  [%s] train 분량 부족", ticker)
+        return None
+
     logger.info("  [%s] 모델 학습 중 (train: %d행)...", ticker, len(train_df))
     try:
-        from ml.model import train, predict
+        from ml.model import train
         _, metrics = train(train_df, f"{ticker}_bt")
     except Exception as e:
         logger.warning("  [%s] 모델 학습 실패: %s", ticker, e)
         return None
 
-    # 트리거 + ML 예측 (test 구간 날짜별)
+    model_path = f"/Users/gyuyeong/quant_trader/ml/models/{ticker.replace('.','_')}_bt.pkl"
+    if not os.path.exists(model_path):
+        return {"ticker": ticker, "name": name, "trades": 0}
+
+    with open(model_path, "rb") as f:
+        model = pickle.load(f)["model"]
+
+    avg_win  = metrics["avg_win"]
+    avg_loss = metrics["avg_loss"]
+    rr       = avg_win / avg_loss if avg_loss > 0 else 0
+
+    # 테스트 구간 분봉
+    test_min   = df_min[df_min.index.date >= cutoff]
+    test_dates = sorted(set(test_min.index.date))
+
     from signals.scanner import detect_triggers
+    from ml.features import add_features, FEATURE_COLS
 
-    trades     = []
-    test_dates = [d for d in test_df.index if d.date() >= cutoff]
+    trades = []
 
-    for i, dt in enumerate(test_dates):
-        # 현재 시점까지의 데이터 (look-ahead 방지)
-        window = df[df.index <= dt]
-        if len(window) < 61:
+    for test_date in test_dates:
+        day_bars = test_min[test_min.index.date == test_date]
+        if len(day_bars) < 5:
             continue
 
-        triggers = detect_triggers(window)
-        if not triggers:
+        hist = df_daily[df_daily.index.date < test_date]
+        if len(hist) < 61:
             continue
 
-        # ML 예측
-        from ml.features import add_features, FEATURE_COLS
-        w_feat = add_features(window)
-        w_feat = w_feat.dropna(subset=FEATURE_COLS)
-        if w_feat.empty:
-            continue
+        signal_found = False
 
-        try:
-            import pickle, os
-            path = f"/Users/gyuyeong/quant_trader/ml/models/{ticker.replace('.','_')}_bt.pkl"
-            if not os.path.exists(path):
+        for i in range(10, len(day_bars)):  # 개장 후 50분 이후부터 체크
+            # 누적 분봉으로 오늘 일봉 바 합성
+            accum = day_bars.iloc[:i + 1]
+            today_bar = pd.DataFrame(
+                [[float(accum["Open"].iloc[0]),
+                  float(accum["High"].max()),
+                  float(accum["Low"].min()),
+                  float(accum["Close"].iloc[-1]),
+                  float(accum["Volume"].sum())]],
+                columns=["Open", "High", "Low", "Close", "Volume"],
+                index=[pd.Timestamp(test_date)],
+            )
+            window = pd.concat([hist, today_bar])
+
+            triggers = detect_triggers(window)
+            if not triggers:
                 continue
-            with open(path, "rb") as f:
-                data = pickle.load(f)
-            model  = data["model"]
-            X      = w_feat[FEATURE_COLS].iloc[[-1]].values.astype(np.float32)
-            wp     = float(model.predict_proba(X)[0, 1])
-        except Exception:
-            continue
 
-        avg_win  = metrics["avg_win"]
-        avg_loss = metrics["avg_loss"]
-        rr       = avg_win / avg_loss if avg_loss > 0 else 0
+            try:
+                w_feat = add_features(window).dropna(subset=FEATURE_COLS)
+                if w_feat.empty:
+                    continue
+                X  = w_feat[FEATURE_COLS].iloc[[-1]].values.astype(np.float32)
+                wp = float(model.predict_proba(X)[0, 1])
+            except Exception:
+                continue
 
-        if wp < MIN_WIN_PROB or rr < MIN_RR:
-            continue
+            if wp < MIN_WIN_PROB or rr < MIN_RR:
+                continue
 
-        # 가상 매수
-        entry_price = float(window["Close"].iloc[-1])
-        entry_date  = dt.date()
+            # 다음 봉 시가에 매수
+            if i + 1 >= len(day_bars):
+                break
 
-        # 7일 후 청산
-        future = df[df.index.date > entry_date]
-        if len(future) < HORIZON:
-            continue
+            entry_price = float(day_bars["Open"].iloc[i + 1])
+            future      = df_daily[df_daily.index.date > test_date]
+            if len(future) < HORIZON:
+                break
 
-        exit_price = float(future["Close"].iloc[HORIZON - 1])
-        exit_date  = future.index[HORIZON - 1].date()
-        pnl_pct    = (exit_price - entry_price) / entry_price * 100
-        win        = pnl_pct >= WIN_THRESHOLD * 100
+            exit_price = float(future["Close"].iloc[HORIZON - 1])
+            exit_date  = future.index[HORIZON - 1].date()
+            pnl_pct    = (exit_price - entry_price) / entry_price * 100
 
-        trades.append({
-            "ticker":      ticker,
-            "name":        name,
-            "entry_date":  str(entry_date),
-            "exit_date":   str(exit_date),
-            "entry_price": round(entry_price, 2),
-            "exit_price":  round(exit_price, 2),
-            "pnl_pct":     round(pnl_pct, 2),
-            "win":         int(win),
-            "triggers":    ", ".join(triggers),
-            "win_prob":    round(wp, 3),
-        })
+            trades.append({
+                "ticker":      ticker,
+                "name":        name,
+                "entry_date":  str(test_date),
+                "exit_date":   str(exit_date),
+                "entry_price": round(entry_price, 2),
+                "exit_price":  round(exit_price, 2),
+                "pnl_pct":     round(pnl_pct, 2),
+                "win":         int(pnl_pct >= WIN_THRESHOLD * 100),
+                "triggers":    ", ".join(triggers),
+                "win_prob":    round(wp, 3),
+            })
+            signal_found = True
+            break  # 하루 1건
+
+        if signal_found:
+            logger.info("  [%s] 신호: %s +%d건", ticker, test_date, len(trades))
 
     if not trades:
         return {"ticker": ticker, "name": name, "trades": 0}
@@ -162,15 +209,15 @@ def backtest_ticker(ticker: str, name: str) -> dict | None:
     rr_real  = abs(avg_w / avg_l) if avg_l != 0 else 0
 
     return {
-        "ticker":    ticker,
-        "name":      name,
-        "trades":    len(trades),
-        "win_rate":  round(win_rate, 1),
-        "avg_pnl":   round(avg_pnl, 2),
-        "avg_win":   round(avg_w, 2),
-        "avg_loss":  round(avg_l, 2),
-        "rr":        round(rr_real, 2),
-        "detail":    trades,
+        "ticker":   ticker,
+        "name":     name,
+        "trades":   len(trades),
+        "win_rate": round(win_rate, 1),
+        "avg_pnl":  round(avg_pnl, 2),
+        "avg_win":  round(avg_w, 2),
+        "avg_loss": round(avg_l, 2),
+        "rr":       round(rr_real, 2),
+        "detail":   trades,
     }
 
 
@@ -179,17 +226,37 @@ def backtest_ticker(ticker: str, name: str) -> dict | None:
 # ─────────────────────────────────────────────
 
 def run_backtest(stocks: dict | None = None) -> str:
-    """
-    관심종목 전체 1개월 백테스트.
-    반환: 텔레그램 전송용 결과 문자열
-    """
+    """45일 분봉 ML 백테스트. 반환: 텔레그램 전송용 결과 문자열."""
     if stocks is None:
-        from config import STOCKS
-        stocks = STOCKS
+        try:
+            from signals.krx_universe import get_krx_candidates
+            stocks = get_krx_candidates(top_n=100)
+        except Exception:
+            stocks = {}
+        if not stocks:
+            from config import STOCKS
+            stocks = STOCKS
 
-    logger.info("=== 1개월 ML 백테스트 시작 (%d종목) ===", len(stocks))
+        try:
+            from signals.us_universe import get_us_candidates
+            us_stocks = get_us_candidates(top_n=50)
+        except Exception:
+            us_stocks = {}
+        if not us_stocks:
+            from config import US_STOCKS
+            us_stocks = US_STOCKS
+        if us_stocks:
+            stocks = {**stocks, **us_stocks}
+
+    from signals.scanner import BLACKLIST
+    start_date = date.today() - timedelta(days=TEST_DAYS)
+    logger.info("=== 45일 분봉 ML 백테스트 시작 (%d종목) ===", len(stocks))
+
     results = []
     for ticker, name in stocks.items():
+        if ticker in BLACKLIST:
+            logger.info("  [%s] 블랙리스트 — 스킵", ticker)
+            continue
         r = backtest_ticker(ticker, name)
         if r:
             results.append(r)
@@ -197,12 +264,12 @@ def run_backtest(stocks: dict | None = None) -> str:
     if not results:
         return "⚠️ 백테스트 결과 없음 — 데이터 또는 신호 부족"
 
-    active  = [r for r in results if r.get("trades", 0) > 0]
-    no_sig  = [r for r in results if r.get("trades", 0) == 0]
+    active = [r for r in results if r.get("trades", 0) > 0]
+    no_sig = [r for r in results if r.get("trades", 0) == 0]
 
     lines = [
-        f"📊 <b>1개월 ML 백테스트 결과</b>",
-        f"기간: {date.today() - relativedelta(months=1)} ~ {date.today()}",
+        f"📊 <b>45일 분봉 ML 백테스트 결과</b>",
+        f"기간: {start_date} ~ {date.today()}",
         f"대상: {len(stocks)}종목 / 신호 발생: {len(active)}종목\n",
     ]
 
@@ -214,9 +281,8 @@ def run_backtest(stocks: dict | None = None) -> str:
         )
 
     if no_sig:
-        lines.append(f"\n신호 없음: {', '.join(r['name'] for r in no_sig)}")
+        lines.append(f"\n신호 없음: {', '.join(r['ticker'] for r in no_sig)}")
 
-    # 전체 종합
     if active:
         all_trades  = sum(r["trades"] for r in active)
         all_win     = sum(r["trades"] * r["win_rate"] / 100 for r in active)
@@ -231,5 +297,11 @@ def run_backtest(stocks: dict | None = None) -> str:
 
 
 if __name__ == "__main__":
-    from config import STOCKS
-    print(run_backtest(STOCKS))
+    from config import US_STOCKS
+    try:
+        from signals.us_universe import get_us_candidates
+        us_stocks = get_us_candidates(top_n=50)
+    except Exception:
+        us_stocks = {}
+    stocks = us_stocks if us_stocks else US_STOCKS
+    print(run_backtest(stocks))

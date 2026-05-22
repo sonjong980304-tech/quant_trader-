@@ -169,7 +169,7 @@ Context Recall이란: 검색된 컨텍스트의 핵심 정보 중 실제 답변�
 """
 
     resp = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model="gpt-4.5-mini",
         messages=[{"role": "user", "content": eval_prompt}],
         temperature=0,
     )
