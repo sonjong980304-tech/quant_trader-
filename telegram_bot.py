@@ -12,6 +12,7 @@ telegram_bot.py - 텔레그램 봇 명령어 처리
   /help         - 도움말
 """
 
+import asyncio
 import re
 import subprocess
 import logging
@@ -328,7 +329,8 @@ async def _gpt_reply(update: Update, text: str):
     user_id = update.effective_user.id
 
     try:
-        answer = gpt_ask(user_id, text.strip())
+        loop   = asyncio.get_event_loop()
+        answer = await loop.run_in_executor(None, gpt_ask, user_id, text.strip())
         # 텔레그램 메시지 최대 4096자 제한
         if len(answer) > 4000:
             for i in range(0, len(answer), 4000):
