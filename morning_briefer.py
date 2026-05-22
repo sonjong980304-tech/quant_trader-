@@ -190,12 +190,14 @@ def _fetch_us_rankings(tickers: list, label: str, flag: str) -> str:
 
     def _info(ticker):
         try:
-            info = yf.Ticker(ticker).info
+            t    = yf.Ticker(ticker)
+            fi   = t.fast_info
+            name = t.info.get("shortName", ticker)
             return {
                 "ticker": ticker,
-                "name":   info.get("shortName", ticker),
-                "mc":     info.get("marketCap", 0) or 0,
-                "price":  info.get("currentPrice") or info.get("regularMarketPrice", 0) or 0,
+                "name":   name,
+                "mc":     fi.market_cap or 0,
+                "price":  fi.last_price or 0,
             }
         except Exception:
             return {"ticker": ticker, "name": ticker, "mc": 0, "price": 0}
@@ -219,9 +221,9 @@ _KOSPI_CANDIDATES = [
 ]
 
 _KOSDAQ_CANDIDATES = [
-    "247540.KQ","086520.KQ","247600.KQ","196170.KQ","041510.KQ",
-    "263750.KQ","122870.KQ","035900.KQ","091990.KQ","145020.KQ",
-    "357780.KQ","294870.KQ","028300.KQ","214150.KQ","046310.KQ",
+    "247540.KQ","086520.KQ","196170.KQ","041510.KQ","263750.KQ",
+    "122870.KQ","035900.KQ","145020.KQ","357780.KQ","294870.KQ",
+    "028300.KQ","214150.KQ","046310.KQ","900140.KQ","950130.KQ",
 ]
 
 
@@ -231,12 +233,15 @@ def _fetch_kr_rankings(tickers: list, label: str) -> str:
 
     def _info(ticker):
         try:
-            info = yf.Ticker(ticker).info
+            t    = yf.Ticker(ticker)
+            fi   = t.fast_info
+            info = t.info
+            name = info.get("shortName") or info.get("longName", ticker)
             return {
                 "ticker": ticker,
-                "name":   info.get("shortName") or info.get("longName", ticker),
-                "mc":     info.get("marketCap", 0) or 0,
-                "price":  info.get("currentPrice") or info.get("regularMarketPrice", 0) or 0,
+                "name":   name,
+                "mc":     fi.market_cap or 0,
+                "price":  fi.last_price or 0,
             }
         except Exception:
             return {"ticker": ticker, "name": ticker, "mc": 0, "price": 0}
