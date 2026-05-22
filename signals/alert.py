@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 alert.py - 급등 신호 텔레그램 알림 전송
 

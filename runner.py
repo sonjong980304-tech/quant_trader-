@@ -1,48 +1,106 @@
 """
-runner.py - 장중 우선순위 기반 자동매매 스케줄러
-실행 순서 (매 사이클):
-  ① 매도신호 → ② 매수신호
+runner.py - ML 급등주 전략 스케줄러
 
-분봉 데이터로 오늘 실시간 일봉 바를 구성해 모든 신호를 현재 시각 기준으로 판단.
-분봉 거래량 급증 감지 시 네이버 최신 뉴스 3건을 텔레그램으로 전송.
+스케줄:
+  5분마다  → scan_growth_signals() : ML 급등주 스캔 (한국장·미국장 자동 필터)
+  08:00   → send_morning_briefing()
+  08:30   → run_monthly_rebalance() (매월 1일)
+  15:00   → send_daily_summary()
 """
 
 import schedule
 import time
 import logging
 import logging.handlers
-from datetime import datetime, timedelta, date
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, date
 
 import pandas as pd
 import pytz
+import yfinance as yf
 
 from config import (
-    STOCKS, MA_SHORT, MA_LONG, RSI_PERIOD, KIS_APP_KEY,
-    VOLUME_SURGE_MINUTE_RATIO,
+    STOCKS, US_STOCKS, MA_SHORT, MA_LONG, RSI_PERIOD, KIS_APP_KEY, GROWTH_ASSET_RATIO,
 )
 from data_fetcher import fetch_ohlcv, get_minute_data
 from indicators import add_all_indicators, detect_crossover
-from strategy import generate_signals, get_latest_signal, buy_signal_1_intraday
-from trader import (
-    positions, KISTrader,
-    calc_position_size,
-    register_position, clear_position,
-    execute_buy, execute_sell_all, execute_sell_half,
-)
-from notifier import (
-    build_buy_message, build_sell_full_message, build_sell_partial_message,
-    send_telegram, build_volume_surge_message, build_daily_summary_message,
-)
-from news_fetcher import fetch_naver_news
+from strategy import generate_signals, get_latest_signal
+from trader import positions, KISTrader
+from notifier import send_telegram, build_daily_summary_message
 from morning_briefer import send_morning_briefing
-from trade_logger import log_buy, log_sell
-from conditional_orders import check_and_execute as check_cond_orders
 from signals.scanner import scan_all
 from signals.alert import send_signal_alert
-from config import GROWTH_ASSET_RATIO
 
 KST      = pytz.timezone("Asia/Seoul")
 LOG_FILE = "logs/trader.log"
+
+# OHLCV 캐시: {ticker: (DataFrame, timestamp)}  — 30분 TTL
+_OHLCV_CACHE: dict = {}
+_CACHE_TTL   = 1800  # 초
+
+# 분봉 캐시: {ticker: (DataFrame, timestamp)}  — 5분 TTL
+_MINUTE_CACHE: dict = {}
+_MINUTE_TTL   = 300  # 초
+
+
+def _fetch_minute_yf(ticker: str):
+    """yfinance 5분봉 다운로드 (한국/미국 공통, ~15분 지연). 캐시 5분."""
+    now = time.time()
+    if ticker in _MINUTE_CACHE:
+        df, ts = _MINUTE_CACHE[ticker]
+        if now - ts < _MINUTE_TTL:
+            return df
+    try:
+        df = yf.download(ticker, period="1d", interval="5m",
+                         auto_adjust=True, progress=False)
+        if df.empty:
+            _MINUTE_CACHE[ticker] = (None, now)
+            return None
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        df = df.rename(columns={
+            "Open": "open", "High": "high",
+            "Low": "low", "Close": "close", "Volume": "volume",
+        })
+        _MINUTE_CACHE[ticker] = (df, now)
+        return df
+    except Exception:
+        _MINUTE_CACHE[ticker] = (None, now)
+        return None
+
+
+def _cached_fetch(ticker: str, period_years: int = 1) -> pd.DataFrame:
+    now = time.time()
+    if ticker in _OHLCV_CACHE:
+        df, ts = _OHLCV_CACHE[ticker]
+        if now - ts < _CACHE_TTL:
+            return df
+    df = fetch_ohlcv(ticker, period_years)
+    _OHLCV_CACHE[ticker] = (df, time.time())
+    return df
+
+
+def _prefetch_parallel(tickers: list, period_years: int = 1, max_workers: int = 15):
+    """캐시 미스(만료·신규) 종목만 병렬 다운로드 후 캐시에 저장."""
+    now   = time.time()
+    stale = [t for t in tickers
+             if t not in _OHLCV_CACHE or now - _OHLCV_CACHE[t][1] >= _CACHE_TTL]
+    if not stale:
+        return
+
+    logger.info("OHLCV 병렬 다운로드: %d종목 (workers=%d)", len(stale), max_workers)
+
+    def _fetch_one(ticker):
+        df = fetch_ohlcv(ticker, period_years)
+        _OHLCV_CACHE[ticker] = (df, time.time())
+
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futures = {ex.submit(_fetch_one, t): t for t in stale}
+        for fut in as_completed(futures):
+            try:
+                fut.result()
+            except Exception as e:
+                logger.debug("prefetch 실패 [%s]: %s", futures[fut], e)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -55,19 +113,6 @@ logging.basicConfig(
     force=True,
 )
 logger = logging.getLogger("runner")
-
-_surge_alerted: dict = {}
-_SURGE_COOLDOWN_MINUTES = 30
-
-
-def is_market_hours() -> bool:
-    now = datetime.now(KST)
-    if now.weekday() >= 5:
-        return False
-    market_open  = now.replace(hour=9,  minute=0,  second=0, microsecond=0)
-    market_close = now.replace(hour=15, minute=30, second=0, microsecond=0)
-    return market_open <= now <= market_close
-
 
 def _get_total_asset(trader: KISTrader) -> float:
     try:
@@ -124,34 +169,6 @@ def _append_today_bar(daily_df: pd.DataFrame, minute_df) -> pd.DataFrame:
     return daily_df
 
 
-def _check_volume_surge(ticker: str, stock_name: str, minute_df, current_price: float):
-    """분봉 거래량 급증(5배↑) 감지 → 네이버 뉴스 3건 텔레그램 전송."""
-    if minute_df is None or minute_df.empty or len(minute_df) < 6:
-        return
-
-    current_vol = float(minute_df["volume"].iloc[-1])
-    avg_vol     = float(minute_df["volume"].iloc[-6:-1].mean())
-
-    if avg_vol <= 0:
-        return
-
-    surge_ratio = current_vol / avg_vol
-    if surge_ratio < VOLUME_SURGE_MINUTE_RATIO:
-        return
-
-    last_alert = _surge_alerted.get(ticker)
-    now        = datetime.now(KST)
-    if last_alert and (now - last_alert) < timedelta(minutes=_SURGE_COOLDOWN_MINUTES):
-        return
-
-    logger.info("  [급증] %s 분봉 거래량 %.1f배 — 뉴스 수집 중", stock_name, surge_ratio)
-    _surge_alerted[ticker] = now
-
-    news_items = fetch_naver_news(stock_name, n=3)
-    msg = build_volume_surge_message(stock_name, current_price, surge_ratio, news_items)
-    send_telegram(msg)
-
-
 def send_daily_summary():
     """오후 3시 종목별 일일 기술적 분석 리포트를 텔레그램으로 전송."""
     now = datetime.now(KST)
@@ -185,136 +202,6 @@ def send_daily_summary():
             logger.error("  일일 리포트 실패 (%s): %s", stock_name, e)
 
     logger.info("일일 기술적 분석 리포트 전송 완료")
-
-
-def run_priority_loop():
-    if not is_market_hours():
-        logger.info("장 시간 외 — 실행 건너뜀 (%s)", datetime.now(KST).strftime("%H:%M"))
-        return
-
-    now = datetime.now(KST)
-    logger.info("=" * 55)
-    logger.info("매매 루프 시작 (%s)", now.strftime("%Y-%m-%d %H:%M"))
-    logger.info("=" * 55)
-
-    if KIS_APP_KEY:
-        try:
-            trader      = KISTrader()
-            total_asset = _get_total_asset(trader)
-        except Exception as e:
-            logger.error("KISTrader 초기화 실패: %s", e)
-            return
-    else:
-        trader      = None
-        total_asset = 10_000_000
-        logger.info("KIS_APP_KEY 미설정 — 시뮬레이션 모드")
-
-    for ticker, stock_name in STOCKS.items():
-        stock_code = ticker.replace(".KS", "").replace(".KQ", "")
-        logger.info("\n>>> [%s] %s 처리 시작", ticker, stock_name)
-
-        # ── 1단계: 원시 일봉 데이터 조회 ─────────────────
-        try:
-            raw_df = fetch_ohlcv(ticker, period_years=1)
-        except Exception as e:
-            logger.error("  일봉 데이터 조회 실패: %s", e)
-            continue
-
-        # ── 2단계: 현재가 + 분봉 데이터 조회 ─────────────
-        minute_df     = None
-        current_price = float(raw_df["Close"].iloc[-1])
-        try:
-            if trader:
-                price_info    = trader.get_current_price(stock_code)
-                current_price = float(price_info["price"])
-            try:
-                minute_df = get_minute_data(ticker, interval_min=1)
-            except Exception as e:
-                logger.warning("  분봉 데이터 조회 실패: %s", e)
-        except Exception as e:
-            logger.error("  현재가 조회 실패: %s", e)
-            continue
-
-        # ── 3단계: 오늘 실시간 바 추가 → 지표 재계산 ─────
-        daily_df = _append_today_bar(raw_df, minute_df)
-        try:
-            daily_df = add_all_indicators(
-                daily_df, short=MA_SHORT, long=MA_LONG, rsi_period=RSI_PERIOD
-            )
-            daily_df = detect_crossover(daily_df, short=MA_SHORT, long=MA_LONG)
-            daily_df = generate_signals(daily_df)
-        except Exception as e:
-            logger.error("  지표/신호 계산 실패: %s", e)
-            continue
-
-        # ── 분봉 거래량 급증 감지 ────────────────────────
-        if minute_df is not None and not minute_df.empty:
-            _check_volume_surge(ticker, stock_name, minute_df, current_price)
-
-        # ── 조건부 주문 체크 ──────────────────────────
-        for cond_msg in check_cond_orders(ticker, stock_code, current_price, trader):
-            send_telegram(cond_msg)
-
-        sig = get_latest_signal(daily_df)
-        logger.info("  실시간 기준일: %s  현재가: %s원", sig["date"], f"{current_price:,.0f}")
-
-        # ① 매도 신호 체크 (보유 종목만)
-        if ticker in positions:
-            if sig["sell_full"]:
-                logger.info("  전략 매도(2원칙-전량) 실행: %s", ticker)
-                execute_sell_all(ticker)
-                msg = build_sell_full_message(stock_name, sig, "전략 매도 신호(2원칙-전량)")
-                send_telegram(msg)
-                log_sell(ticker, sig["close"], notes="2원칙-전량")
-                clear_position(ticker)
-                continue
-            if sig["sell_partial"]:
-                logger.info("  전략 매도(1원칙-부분) 실행: %s", ticker)
-                execute_sell_half(ticker)
-                msg = build_sell_partial_message(stock_name, sig, "전략 매도 신호(1원칙-부분)")
-                send_telegram(msg)
-                log_sell(ticker, sig["close"], notes="1원칙-부분")
-                continue
-
-        # ② 매수 신호 체크 (미보유 종목만)
-        if ticker not in positions:
-            buy_triggered = False
-            buy_principle = ""
-
-            # 1원칙: 분봉 기반 (9:30 이후 시가 돌파)
-            try:
-                if minute_df is not None and not minute_df.empty:
-                    if buy_signal_1_intraday(ticker, minute_df, daily_df):
-                        buy_triggered = True
-                        buy_principle = "1원칙(시가돌파)"
-            except Exception as e:
-                logger.warning("  분봉 매수 신호 확인 실패: %s", e)
-
-            # 2, 3원칙: 실시간 일봉 기반
-            if not buy_triggered:
-                last = daily_df.iloc[-1]
-                if last.get("buy_signal_2", False):
-                    buy_triggered = True
-                    buy_principle = "2원칙(MA사이반등)"
-                elif last.get("buy_signal_3", False):
-                    buy_triggered = True
-                    buy_principle = "3원칙(MA20아래급등)"
-
-            if buy_triggered:
-                qty = calc_position_size(ticker, total_asset, current_price)
-                if qty > 0:
-                    result = execute_buy(stock_code, qty)
-                    if result:
-                        register_position(ticker, current_price, qty)
-                        msg = build_buy_message(stock_name, sig, buy_principle)
-                        send_telegram(msg)
-                        log_buy(ticker, stock_name, current_price, qty, strategy=buy_principle)
-                        logger.info("  매수 실행: %s %d주 @ %s원 (%s)",
-                                    stock_code, qty, f"{current_price:,.0f}", buy_principle)
-                else:
-                    logger.info("  매수 신호(%s) — 자금 부족 또는 이미 보유", buy_principle)
-
-    logger.info("\n매매 루프 종료")
 
 
 # ─────────────────────────────────────────────
@@ -448,7 +335,7 @@ def _is_us_market() -> bool:
 
 def scan_growth_signals():
     """
-    10분마다 실행 — 한국장 또는 미국장 시간 중에만 스캔.
+    5분마다 실행 — 한국장 또는 미국장 시간 중에만 스캔.
     봇이 활성화된 경우에만 동작.
     """
     if not _check_activation():
@@ -469,8 +356,38 @@ def scan_growth_signals():
         except Exception as e:
             logger.warning("총 자산 조회 실패: %s", e)
 
-    from data_fetcher import fetch_ohlcv as _fetch
-    signals = scan_all(STOCKS, lambda tk: _fetch(tk, period_years=1))
+    if _is_kr_market():
+        # 한국장: KRX 전체 종목 1차 스크리닝 후 ML 분석
+        from signals.krx_universe import get_krx_candidates
+        stocks_to_scan = get_krx_candidates(top_n=100)
+        if not stocks_to_scan:
+            stocks_to_scan = STOCKS  # fallback
+    else:
+        # 미국장: S&P 500 전체 스크리닝
+        from signals.us_universe import get_us_candidates
+        stocks_to_scan = get_us_candidates(top_n=50)
+        if not stocks_to_scan:
+            stocks_to_scan = US_STOCKS if US_STOCKS else STOCKS
+
+    # 일봉 캐시 미스 종목 병렬 다운로드
+    tickers = list(stocks_to_scan.keys())
+    _prefetch_parallel(tickers)
+
+    # 분봉 병렬 다운로드 (오늘 바 합성용, 5분 TTL)
+    now = time.time()
+    stale_min = [t for t in tickers
+                 if t not in _MINUTE_CACHE or now - _MINUTE_CACHE[t][1] >= _MINUTE_TTL]
+    if stale_min:
+        logger.info("분봉 병렬 다운로드: %d종목", len(stale_min))
+        with ThreadPoolExecutor(max_workers=10) as ex:
+            list(ex.map(_fetch_minute_yf, stale_min))
+
+    def _fetch_with_today(ticker: str) -> pd.DataFrame:
+        df = _cached_fetch(ticker)
+        minute_df = _fetch_minute_yf(ticker)
+        return _append_today_bar(df, minute_df)
+
+    signals = scan_all(stocks_to_scan, _fetch_with_today)
 
     if not signals:
         logger.debug("급등주 신호 없음")
@@ -484,6 +401,27 @@ def scan_growth_signals():
 # ─────────────────────────────────────────────
 # 월간 리밸런싱
 # ─────────────────────────────────────────────
+
+def retrain_models():
+    """매일 07:30 실행 — 전체 종목 ML 모델 최신 데이터로 재학습."""
+    now = datetime.now(KST)
+    if now.weekday() >= 5:
+        return
+    logger.info("ML 일일 재학습 시작")
+    try:
+        from ml.trainer import retrain_daily
+        results = retrain_daily()
+        ok   = sum(1 for v in results.values() if v)
+        fail = len(results) - ok
+        send_telegram(
+            f"🤖 <b>ML 모델 재학습 완료</b>\n"
+            f"성공: {ok}개 / 실패: {fail}개\n"
+            f"{now.strftime('%Y-%m-%d %H:%M')} 기준 최신 데이터 반영"
+        )
+    except Exception as e:
+        logger.error("ML 재학습 실패: %s", e)
+        send_telegram(f"⚠️ ML 재학습 오류: {e}")
+
 
 def run_monthly_rebalance():
     """매월 1일 오전 8시 30분 실행 — 안전자산 비중 재조정."""
@@ -536,26 +474,15 @@ def main():
     # 기존 보유 종목 기록 (최초 1회)
     _init_legacy_tickers()
 
-    # 한국장 5분 간격 매매 루프 (09:05 ~ 15:25)
-    times = []
-    h, m = 9, 5
-    while (h, m) <= (15, 25):
-        times.append(f"{h:02d}:{m:02d}")
-        m += 5
-        if m >= 60:
-            m -= 60
-            h += 1
-
     schedule.clear()
-    for t in times:
-        schedule.every().day.at(t).do(run_priority_loop)
 
     # 고정 스케줄
+    schedule.every().day.at("07:30").do(retrain_models)
     schedule.every().day.at("08:00").do(send_morning_briefing)
     schedule.every().day.at("15:00").do(send_daily_summary)
 
-    # 급등주 10분 스캔 (장중 자동 필터링)
-    schedule.every(10).minutes.do(scan_growth_signals)
+    # ML 급등주 5분 스캔 (한국장 + 미국장 자동 필터링)
+    schedule.every(5).minutes.do(scan_growth_signals)
 
     # 월간 리밸런싱 (매월 1일 08:30)
     schedule.every().day.at("08:30").do(
@@ -563,9 +490,8 @@ def main():
     )
 
     logger.info(
-        "등록 완료: 매매루프 %d개 / 08:00 모닝브리핑 / 15:00 일일리포트 / "
-        "10분 급등주스캔 / 매월 1일 08:30 리밸런싱",
-        len(times),
+        "등록 완료: 07:30 ML재학습 / 08:00 모닝브리핑 / 15:00 일일리포트 / "
+        "5분 ML 급등주스캔 / 매월 1일 08:30 리밸런싱"
     )
 
     while True:

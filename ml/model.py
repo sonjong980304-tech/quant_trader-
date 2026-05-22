@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 model.py - XGBoost 7일 수익 예측 모델
 

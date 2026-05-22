@@ -38,9 +38,10 @@ NAVER_CLIENT_SECRET = os.getenv("NAVER_CLIENT_SECRET", "")
 # 매매 대상 종목 (stocks.py에서 로드 — GitHub 비공개)
 # ─────────────────────────────────────────────
 try:
-    from stocks import STOCKS
+    from stocks import STOCKS, US_STOCKS
 except ImportError:
     STOCKS = {}
+    US_STOCKS = {}
 
 # ─────────────────────────────────────────────
 # 이동평균선 파라미터
@@ -123,7 +124,6 @@ ML_HORIZON          = 7      # 예측 기간 (일)
 ML_THRESHOLD        = 0.03   # 성공 기준 수익률 (3% 이상 = 성공)
 ML_MIN_WIN_PROB     = 0.55   # 신호 발송 최소 승률
 ML_MIN_RISK_REWARD  = 1.5    # 신호 발송 최소 손익비
-ML_KELLY_MAX        = 0.25   # 켈리 비율 최대 캡 (25%)
 
 # ─────────────────────────────────────────────
 # 포트폴리오 배분

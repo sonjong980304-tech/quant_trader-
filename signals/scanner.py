@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 scanner.py - 급등주 유니버스 스크리닝 + 기술적 트리거 탐지
 
@@ -19,6 +21,9 @@ logger = logging.getLogger(__name__)
 MIN_WIN_PROB    = 0.55   # 최소 승률 55%
 MIN_RISK_REWARD = 1.5    # 최소 손익비 1.5
 
+# 구조적 하락 종목 블랙리스트 — 신호 발생 시 무시
+BLACKLIST: set[str] = {"EL"}
+
 KST = pytz.timezone("Asia/Seoul")
 
 # 한국 장 시간 (분 단위)
@@ -26,42 +31,50 @@ _KR_OPEN_MIN  = 9 * 60       # 09:00
 _KR_CLOSE_MIN = 15 * 60 + 30 # 15:30
 _KR_TOTAL_MIN = _KR_CLOSE_MIN - _KR_OPEN_MIN  # 390분
 
+# 미국 장 시간 (ET 기준, 분 단위)
+_US_OPEN_MIN  = 9 * 60 + 30  # 09:30 ET
+_US_CLOSE_MIN = 16 * 60      # 16:00 ET
+_US_TOTAL_MIN = _US_CLOSE_MIN - _US_OPEN_MIN  # 390분
+
 
 def _projected_volume(df: pd.DataFrame) -> float:
     """
     장중 거래량을 하루 예상 거래량으로 환산.
-
-    마지막 행이 오늘 날짜인 경우:
-      - 9:00 이전: 0 반환 (신호 미발생)
-      - 장중 (9:00~15:30): 현재 거래량 ÷ 경과비율
-      - 장 종료 후: 원본 거래량 그대로
-
-    마지막 행이 과거(백테스트)인 경우: 원본 그대로.
+    한국장(KST 기준)과 미국장(ET 기준) 모두 지원.
+    과거 데이터(백테스트)는 원본 그대로 반환.
     """
     last_vol  = float(df["Volume"].iloc[-1])
     last_date = df.index[-1]
     if hasattr(last_date, "date"):
         last_date = last_date.date()
 
-    today = datetime.date.today()
-    if last_date != today:
-        return last_vol  # 과거 데이터 or 장 종료 후 확정치
+    now_kst = datetime.datetime.now(KST)
+    eastern = pytz.timezone("America/New_York")
+    now_et  = now_kst.astimezone(eastern)
 
-    now_kst   = datetime.datetime.now(KST)
-    now_min   = now_kst.hour * 60 + now_kst.minute
+    # 한국장 체크
+    if last_date == now_kst.date():
+        kst_min = now_kst.hour * 60 + now_kst.minute
+        if _KR_OPEN_MIN <= kst_min < _KR_CLOSE_MIN:
+            elapsed = kst_min - _KR_OPEN_MIN
+            if elapsed <= 0:
+                return 0.0
+            return last_vol / (elapsed / _KR_TOTAL_MIN)
+        if kst_min >= _KR_CLOSE_MIN:
+            return last_vol
 
-    if now_min < _KR_OPEN_MIN:
-        return 0.0  # 개장 전 — 신호 미발생
+    # 미국장 체크 (ET 기준)
+    if last_date == now_et.date():
+        et_min = now_et.hour * 60 + now_et.minute
+        if _US_OPEN_MIN <= et_min < _US_CLOSE_MIN:
+            elapsed = et_min - _US_OPEN_MIN
+            if elapsed <= 0:
+                return 0.0
+            return last_vol / (elapsed / _US_TOTAL_MIN)
+        if et_min >= _US_CLOSE_MIN:
+            return last_vol
 
-    elapsed   = now_min - _KR_OPEN_MIN
-    if elapsed <= 0:
-        return 0.0
-
-    if now_min >= _KR_CLOSE_MIN:
-        return last_vol  # 장 종료 — 확정 거래량
-
-    elapsed_ratio = elapsed / _KR_TOTAL_MIN
-    return last_vol / elapsed_ratio  # 하루 예상 거래량
+    return last_vol  # 과거 데이터 or 장 외 시간
 
 
 # ─────────────────────────────────────────────
@@ -195,6 +208,9 @@ def scan_all(stocks: dict, fetch_fn) -> list[dict]:
     """
     signals = []
     for ticker, name in stocks.items():
+        if ticker in BLACKLIST:
+            logger.debug("  [%s] 블랙리스트 — 스킵", ticker)
+            continue
         try:
             df = fetch_fn(ticker)
             result = scan_ticker(ticker, df)

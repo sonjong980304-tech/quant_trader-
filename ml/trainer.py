@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 trainer.py - 관심종목 전체 XGBoost 모델 일괄 학습
 
@@ -21,17 +23,55 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _fetch(ticker: str, period: str) -> pd.DataFrame:
+    df = yf.download(ticker, period=period, auto_adjust=True, progress=False)
+    if df.empty:
+        raise ValueError(f"{ticker} 데이터 없음")
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+    df = df[["Open", "High", "Low", "Close", "Volume"]].dropna()
+    logger.info("  %s: %d행 (%s ~ %s)",
+                ticker, len(df), df.index[0].date(), df.index[-1].date())
+    return df
+
+
 def fetch_10y(ticker: str) -> pd.DataFrame:
     """10년치 일봉 데이터 다운로드."""
     logger.info("데이터 다운로드: %s (10년)", ticker)
-    df = yf.download(ticker, period="10y", auto_adjust=True, progress=False)
-    if df.empty:
-        raise ValueError(f"{ticker} 데이터 없음")
-    df = df[["Open", "High", "Low", "Close", "Volume"]].dropna()
-    logger.info("  %s: %d행 (%s ~ %s)",
-                ticker, len(df),
-                df.index[0].date(), df.index[-1].date())
-    return df
+    return _fetch(ticker, "10y")
+
+
+def fetch_5y(ticker: str) -> pd.DataFrame:
+    """5년치 일봉 데이터 다운로드 (일일 재학습용)."""
+    logger.info("데이터 다운로드: %s (5년)", ticker)
+    return _fetch(ticker, "5y")
+
+
+def retrain_daily() -> dict:
+    """
+    매일 07:30 실행 — 전체 관심 종목을 최근 2년 데이터로 재학습.
+    반환: {ticker: metrics or None}
+    """
+    from config import STOCKS, US_STOCKS
+    from ml.model import train
+
+    tickers = list(dict.fromkeys(list(STOCKS.keys()) + list(US_STOCKS.keys())))
+    logger.info("일일 재학습 시작: %d개 종목", len(tickers))
+    results = {}
+    for ticker in tickers:
+        try:
+            df = fetch_5y(ticker)
+            _, metrics = train(df, ticker)
+            results[ticker] = metrics
+            logger.info("  [OK] %s acc=%.3f auc=%.3f", ticker,
+                        metrics["accuracy"], metrics["auc"])
+        except Exception as e:
+            logger.error("  [FAIL] %s: %s", ticker, e)
+            results[ticker] = None
+    ok   = sum(1 for v in results.values() if v)
+    fail = len(results) - ok
+    logger.info("일일 재학습 완료: 성공 %d / 실패 %d", ok, fail)
+    return results
 
 
 def train_ticker(ticker: str) -> dict | None:

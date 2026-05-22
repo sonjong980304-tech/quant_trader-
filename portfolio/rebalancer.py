@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 rebalancer.py - 월 1회 자동 몬테카를로 리밸런싱
 
@@ -173,7 +175,7 @@ def _llm_decide_rebalance(
 """
 
     resp = client.chat.completions.create(
-        model="gpt-4.1",
+        model="gpt-4.5",
         messages=[
             {"role": "system", "content": "포트폴리오 리밸런싱 전문가. 간결하고 정확하게 답변."},
             {"role": "user",   "content": prompt},
