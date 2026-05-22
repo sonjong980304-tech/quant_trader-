@@ -9,3 +9,4 @@ results/
 *.plist
 stocks.py
 .omc/
+conditional_orders.json
