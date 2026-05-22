@@ -256,6 +256,140 @@ class KISTrader:
 
         return int(float(data["output"].get("ord_psbl_cash", 0)))
 
+    # ─────────────────────────────────────────────
+    # 미국 주식 (해외주식, 통합증거금서비스)
+    # ─────────────────────────────────────────────
+
+    @staticmethod
+    def _us_exchange(symbol: str) -> tuple[str, str]:
+        """
+        심볼 → (주문용 OVRS_EXCG_CD, 시세용 EXCD) 반환.
+        기본 NASDAQ. NYSE/AMEX 종목은 직접 지정 필요.
+        """
+        _nyse = {"BRK-B", "JPM", "GS", "BAC", "WMT", "XOM", "CVX"}
+        _amex = {"SPY"}  # SPY는 NYSE Arca지만 AMEX로도 조회 가능
+        sym = symbol.upper().replace("-", ".")
+        if sym in _nyse:
+            return "NYSE", "NYS"
+        if sym in _amex:
+            return "AMEX", "AMS"
+        return "NASD", "NAS"
+
+    def get_us_current_price(self, symbol: str) -> dict:
+        """
+        미국 주식 현재가 조회.
+        symbol: Yahoo Finance 심볼 (예: 'QQQ', 'TLT', 'AAPL')
+        반환: {"symbol": str, "price": float, "currency": "USD"}
+        """
+        _, excd = self._us_exchange(symbol)
+        url = f"{self.base_url}/uapi/overseas-price/v1/quotations/price"
+        params = {
+            "AUTH": "",
+            "EXCD": excd,
+            "SYMB": symbol.upper(),
+        }
+
+        resp = requests.get(url, headers=self._headers("HHDFS00000300"), params=params, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+
+        if data.get("rt_cd") != "0":
+            raise ValueError(f"미국주식 현재가 조회 실패 [{symbol}]: {data.get('msg1')}")
+
+        output = data["output"]
+        return {
+            "symbol":      symbol.upper(),
+            "price":       float(output.get("last", output.get("stck_prpr", 0))),
+            "change_rate": float(output.get("diff", 0)),
+            "currency":    "USD",
+        }
+
+    def _place_us_order(self, symbol: str, qty: int, order_type: str) -> dict:
+        """
+        미국 주식 주문 (통합증거금서비스 — KIS가 원화→달러 자동 환전).
+        order_type: "BUY" 또는 "SELL"
+        모의: VTTT1002U(매수) / VTTT1001U(매도)
+        실투: TTTT1002U(매수) / TTTT1006U(매도)
+        """
+        if IS_MOCK:
+            tr_id = "VTTT1002U" if order_type == "BUY" else "VTTT1001U"
+        else:
+            tr_id = "TTTT1002U" if order_type == "BUY" else "TTTT1006U"
+
+        ovrs_excg_cd, _ = self._us_exchange(symbol)
+
+        # 현재가로 지정가 주문 (시장가 효과)
+        price_info = self.get_us_current_price(symbol)
+        limit_price = str(round(price_info["price"], 2))
+
+        url  = f"{self.base_url}/uapi/overseas-stock/v1/trading/order"
+        body = {
+            "CANO":           self.cano,
+            "ACNT_PRDT_CD":   self.acnt_prdt,
+            "OVRS_EXCG_CD":   ovrs_excg_cd,
+            "PDNO":           symbol.upper(),
+            "ORD_DVSN":       "00",          # 지정가
+            "ORD_QTY":        str(qty),
+            "OVRS_ORD_UNPR":  limit_price,   # 현재가로 지정 → 시장가 효과
+            "ORD_SVR_DVSN_CD": "0",
+        }
+
+        resp = requests.post(url, headers=self._headers(tr_id), json=body, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+
+        if data.get("rt_cd") != "0":
+            raise ValueError(f"미국주식 {order_type} 주문 실패 [{symbol}]: {data.get('msg1')}")
+
+        logger.info("미국주식 %s 주문 완료: %s %d주 @ $%s", order_type, symbol, qty, limit_price)
+        return data.get("output", {})
+
+    def buy_us(self, symbol: str, qty: int) -> dict:
+        """미국 주식 시장가(지정가) 매수 — 통합증거금서비스"""
+        return self._place_us_order(symbol, qty, "BUY")
+
+    def sell_us(self, symbol: str, qty: int) -> dict:
+        """미국 주식 시장가(지정가) 매도 — 통합증거금서비스"""
+        return self._place_us_order(symbol, qty, "SELL")
+
+    def get_us_balance(self) -> list:
+        """
+        미국 주식 잔고 조회.
+        반환: [{"symbol": str, "qty": int, "avg_price": float, "eval_profit": float, "currency": "USD"}, ...]
+        """
+        url   = f"{self.base_url}/uapi/overseas-stock/v1/trading/inquire-balance"
+        tr_id = "VTTS3012R" if IS_MOCK else "TTTS3012R"
+
+        params = {
+            "CANO":          self.cano,
+            "ACNT_PRDT_CD":  self.acnt_prdt,
+            "OVRS_EXCG_CD":  "NASD",  # 전체 조회 시 NASD로 전체 반환
+            "TR_CRCY_CD":    "USD",
+            "CTX_AREA_FK200": "",
+            "CTX_AREA_NK200": "",
+        }
+
+        resp = requests.get(url, headers=self._headers(tr_id), params=params, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+
+        if data.get("rt_cd") != "0":
+            raise ValueError(f"미국주식 잔고 조회 실패: {data.get('msg1')}")
+
+        holdings = []
+        for item in data.get("output1", []):
+            qty = int(float(item.get("cblc_qty", 0)))
+            if qty > 0:
+                holdings.append({
+                    "symbol":      item.get("pdno", ""),
+                    "name":        item.get("prdt_name", ""),
+                    "qty":         qty,
+                    "avg_price":   float(item.get("pchs_avg_pric", 0)),
+                    "eval_profit": float(item.get("evlu_pfls_amt", 0)),
+                    "currency":    "USD",
+                })
+        return holdings
+
 
 # ─────────────────────────────────────────────
 # 포지션 관리 (단일 딕셔너리, 함수를 통해서만 접근)

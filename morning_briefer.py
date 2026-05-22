@@ -43,14 +43,35 @@ def _search(query: str, k: int = 5, days: int = 2) -> str:
     )
 
 
+def _get_holding_names() -> list[str]:
+    """
+    KIS API에서 실제 보유 종목명 조회.
+    실패 시 config STOCKS 목록으로 폴백.
+    """
+    try:
+        from config import KIS_APP_KEY
+        if KIS_APP_KEY:
+            from trader import KISTrader
+            holdings = KISTrader().get_balance()
+            names = [h["name"] for h in holdings if h.get("name")]
+            if names:
+                return names
+    except Exception:
+        pass
+    # 폴백: 관심종목 전체
+    return list(STOCKS.values())
+
+
 def _gather_context() -> dict:
-    """미국 증시 / 관심종목 뉴스 / 경제 캘린더를 병렬 검색"""
+    """미국 증시 / 보유종목 뉴스 / 경제 캘린더를 병렬 검색"""
     now        = datetime.now(KST)
-    # KST 8시 기준 미국 전날 장 마감 → US 날짜는 어제
     from datetime import timedelta
-    us_date    = (now - timedelta(days=1)).strftime("%B %d %Y")   # e.g. "May 21 2026"
+    us_date    = (now - timedelta(days=1)).strftime("%B %d %Y")
     kst_today  = now.strftime("%Y-%m-%d")
-    stock_list = " OR ".join(STOCKS.values())
+
+    # 보유 종목 기준 뉴스 (없으면 관심종목 전체)
+    holding_names = _get_holding_names()
+    stock_list    = " OR ".join(holding_names)
 
     queries = {
         "us_market":     f"US stock market close {us_date} S&P500 Nasdaq Composite Dow Jones recap results",
@@ -79,7 +100,7 @@ def _gather_context() -> dict:
 def _generate_briefing(context: dict) -> str:
     """검색 결과를 바탕으로 4가지 질문에 답하는 브리핑 생성"""
     client     = OpenAI(api_key=OPENAI_API_KEY)
-    stock_list = ", ".join(STOCKS.values())
+    stock_list = ", ".join(_get_holding_names())
 
     user_prompt = f"""아래 검색 결과를 바탕으로 다음 4가지 질문에 답해줘.
 
