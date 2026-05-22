@@ -66,6 +66,23 @@ RSI: 58.3 | 캔들: 양봉
 
 ---
 
+## 모닝 브리핑
+
+매일 평일 **08:00**에 4가지 질문에 대한 브리핑을 자동으로 텔레그램 전송합니다.
+
+| # | 내용 |
+|---|------|
+| 1 | 간밤 미국 증시 마감시황 (다우존스 / S&P500 / 나스닥 등락률 + 원인 1가지) |
+| 2 | 오늘 한국 시장 개장 분위기 판단 (긍정 / 중립 / 부정) |
+| 3 | 관심종목별 핵심 뉴스 (없으면 "특이사항 없음") |
+| 4 | 오늘 발표 예정 주요 경제 지표 / 이벤트 (한국 시간 기준) |
+
+- **GPT-A (gpt-5.5)**: Tavily 웹 검색 결과를 바탕으로 브리핑 생성
+- **GPT-B (gpt-4o-mini)**: Context Recall 점수(0.0~1.0)로 브리핑 품질 자동 평가
+- **시가총액 Top 10**: KOSPI / KOSDAQ / Nasdaq / 다우존스 4개 시장 랭킹 동시 전송
+
+---
+
 ## GPT AI 어시스턴트
 
 텔레그램에서 자연어로 질문하면 GPT-4.1이 자동으로 답변합니다.  
@@ -214,6 +231,7 @@ quant_trader/
 ├── notifier.py         # 텔레그램 알림 메시지 빌더
 ├── news_fetcher.py     # 네이버 뉴스 API 수집
 ├── naver_finance.py    # 네이버 증권 재무지표 스크래핑
+├── morning_briefer.py  # 평일 08:00 모닝 브리핑 (Tavily 검색 + gpt-5.5 생성 + 시가총액 랭킹)
 ├── conditional_orders.py # 조건부 주문 관리 (가격/수익률 조건, JSON 영속 저장)
 ├── gpt_agent.py        # GPT-4.1 AI 어시스턴트 (툴 8종 + Context Recall 평가)
 ├── graph.py            # LangGraph 5노드 에이전트
@@ -268,6 +286,7 @@ TELEGRAM_CHAT_ID=...
 OPENAI_API_KEY=...
 NAVER_CLIENT_ID=...
 NAVER_CLIENT_SECRET=...
+TAVILY_API_KEY=...
 ```
 
 ### 발급 방법
@@ -276,6 +295,7 @@ NAVER_CLIENT_SECRET=...
 - **텔레그램 봇**: `@BotFather` → `/newbot` → Chat ID는 `getUpdates` API로 확인
 - **OpenAI**: [platform.openai.com](https://platform.openai.com) → API Keys
 - **네이버 뉴스 API**: [developers.naver.com](https://developers.naver.com) → 애플리케이션 등록 → 검색 API
+- **Tavily**: [tavily.com](https://tavily.com) → API Keys (모닝 브리핑 웹 검색용)
 
 ---
 
