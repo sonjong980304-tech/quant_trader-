@@ -35,7 +35,7 @@ while true; do
     break
 done
 
-git add -u
+git add -A
 git diff --cached --quiet && exit 0
 
 changed=$(git diff --cached --name-only | tr '\n' ' ' | sed 's/[[:space:]]*$//')
