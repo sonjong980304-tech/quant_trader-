@@ -136,10 +136,10 @@ class KISTrader:
         output = data["output"]
         return {
             "stock_code":  stock_code,
-            "price":       int(output["stck_prpr"]),          # 현재가
-            "change":      int(output["prdy_vrss"]),          # 전일 대비
+            "price":       int(float(output["stck_prpr"])),   # 현재가
+            "change":      int(float(output["prdy_vrss"])),   # 전일 대비
             "change_rate": float(output["prdy_ctrt"]),        # 등락률 (%)
-            "volume":      int(output["acml_vol"]),           # 누적 거래량
+            "volume":      int(float(output["acml_vol"])),    # 누적 거래량
         }
 
     # ─────────────────────────────────────────────
@@ -321,20 +321,18 @@ def check_take_profit(ticker: str, current_price: float) -> "str | None":
     return None
 
 
-def calc_position_size(ticker: str, available_cash: float, current_price: float) -> int:
+def calc_position_size(ticker: str, total_asset: float, current_price: float) -> int:
     """
     1종목당 매수 가능 수량 계산.
     - 이미 보유 중인 종목은 추가 매수 금지 (0 반환)
-    - 가용 현금의 ORDER_RATIO(40%) 한도로 매수
-    - 40% 금액으로 1주도 못 살 경우 1주 매수
+    - 총 자산의 ORDER_RATIO(40%) 한도로 매수
+    - 총 자산 조회 실패(0) 또는 예산 부족 시 0 반환 (1주 강제 매수 금지)
     반환값: 매수 가능 수량 (주)
     """
-    if ticker in positions or current_price <= 0:
+    if ticker in positions or current_price <= 0 or total_asset <= 0:
         return 0
-    budget = available_cash * ORDER_RATIO
-    if budget >= current_price:
-        return int(budget / current_price)
-    return 1
+    budget = total_asset * ORDER_RATIO
+    return int(budget / current_price)
 
 
 # ─────────────────────────────────────────────
