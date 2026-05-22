@@ -1,0 +1,6 @@
+{
+  "bot_active": false,
+  "legacy_tickers": [],
+  "activated_at": null,
+  "note": "legacy_tickers에 보유 중인 기존 2종목 코드가 자동 기록됩니다. 모두 매도 시 bot_active가 true로 전환됩니다."
+}

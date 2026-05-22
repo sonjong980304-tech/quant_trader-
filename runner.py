@@ -35,7 +35,11 @@ from notifier import (
 )
 from news_fetcher import fetch_naver_news
 from morning_briefer import send_morning_briefing
+from trade_logger import log_buy, log_sell
 from conditional_orders import check_and_execute as check_cond_orders
+from signals.scanner import scan_all
+from signals.alert import send_signal_alert
+from config import GROWTH_ASSET_RATIO
 
 KST      = pytz.timezone("Asia/Seoul")
 LOG_FILE = "logs/trader.log"
@@ -261,6 +265,7 @@ def run_priority_loop():
                 execute_sell_all(ticker)
                 msg = build_sell_full_message(stock_name, sig, "전략 매도 신호(2원칙-전량)")
                 send_telegram(msg)
+                log_sell(ticker, sig["close"], notes="2원칙-전량")
                 clear_position(ticker)
                 continue
             if sig["sell_partial"]:
@@ -268,6 +273,7 @@ def run_priority_loop():
                 execute_sell_half(ticker)
                 msg = build_sell_partial_message(stock_name, sig, "전략 매도 신호(1원칙-부분)")
                 send_telegram(msg)
+                log_sell(ticker, sig["close"], notes="1원칙-부분")
                 continue
 
         # ② 매수 신호 체크 (미보유 종목만)
@@ -302,6 +308,7 @@ def run_priority_loop():
                         register_position(ticker, current_price, qty)
                         msg = build_buy_message(stock_name, sig, buy_principle)
                         send_telegram(msg)
+                        log_buy(ticker, stock_name, current_price, qty, strategy=buy_principle)
                         logger.info("  매수 실행: %s %d주 @ %s원 (%s)",
                                     stock_code, qty, f"{current_price:,.0f}", buy_principle)
                 else:
@@ -310,9 +317,226 @@ def run_priority_loop():
     logger.info("\n매매 루프 종료")
 
 
-def main():
-    logger.info("스케줄러 시작 — 5분 간격 장중 실행")
+# ─────────────────────────────────────────────
+# 봇 활성화 게이트
+# ─────────────────────────────────────────────
 
+import json as _json
+
+_STATE_FILE = "/Users/gyuyeong/quant_trader/state.json"
+
+
+def _load_state() -> dict:
+    try:
+        with open(_STATE_FILE) as f:
+            return _json.load(f)
+    except Exception:
+        return {"bot_active": False, "legacy_tickers": [], "activated_at": None}
+
+
+def _save_state(state: dict):
+    with open(_STATE_FILE, "w") as f:
+        _json.dump(state, f, ensure_ascii=False, indent=2)
+
+
+def _init_legacy_tickers():
+    """최초 실행 시 현재 보유 종목을 legacy_tickers로 기록."""
+    state = _load_state()
+    if state.get("bot_active") or state.get("legacy_tickers"):
+        return  # 이미 초기화됨
+
+    if not KIS_APP_KEY:
+        return
+
+    try:
+        balance = KISTrader().get_balance()
+        tickers = [h["stock_code"] for h in balance if h.get("qty", 0) > 0]
+        if tickers:
+            state["legacy_tickers"] = tickers
+            _save_state(state)
+            logger.info("기존 보유 종목 기록: %s — 매도 완료 시 봇 자동 활성화", tickers)
+            send_telegram(
+                f"⏸ <b>봇 대기 중</b>\n"
+                f"기존 보유 종목 {tickers}을 매도하면 자동 시작됩니다.\n"
+                f"현재 텔레그램 LLM 기능은 정상 작동합니다."
+            )
+    except Exception as e:
+        logger.warning("legacy_tickers 초기화 실패: %s", e)
+
+
+def _check_activation():
+    """
+    기존 종목이 모두 매도됐는지 확인.
+    모두 사라지면 bot_active = True 로 전환하고 텔레그램 알림.
+    """
+    state = _load_state()
+    if state.get("bot_active"):
+        return True
+
+    legacy = state.get("legacy_tickers", [])
+    if not legacy:
+        # legacy_tickers 없음 = 처음부터 빈 계좌 → 바로 활성화
+        state["bot_active"] = True
+        state["activated_at"] = datetime.now(KST).isoformat()
+        _save_state(state)
+        return True
+
+    if not KIS_APP_KEY:
+        return False
+
+    try:
+        balance  = KISTrader().get_balance()
+        held     = {h["stock_code"] for h in balance if h.get("qty", 0) > 0}
+        still_holding = [t for t in legacy if t in held]
+
+        if not still_holding:
+            state["bot_active"]   = True
+            state["activated_at"] = datetime.now(KST).isoformat()
+            state["legacy_tickers"] = []
+            _save_state(state)
+            logger.info("기존 종목 전량 매도 확인 → 봇 활성화!")
+            send_telegram(
+                "✅ <b>퀀트 봇 활성화!</b>\n"
+                "기존 보유 종목이 모두 매도됐습니다.\n"
+                "안전자산 포트폴리오 및 급등주 ML 전략을 시작합니다."
+            )
+            return True
+        else:
+            logger.info("봇 대기 중 — 아직 보유: %s", still_holding)
+            return False
+    except Exception as e:
+        logger.warning("활성화 체크 실패: %s", e)
+        return False
+
+
+def is_bot_active() -> bool:
+    return _load_state().get("bot_active", False)
+
+
+# ─────────────────────────────────────────────
+# 장 시간 (한국 / 미국)
+# ─────────────────────────────────────────────
+
+def _is_kr_market() -> bool:
+    now = datetime.now(KST)
+    if now.weekday() >= 5:
+        return False
+    t = now.hour * 60 + now.minute
+    return 9 * 60 <= t <= 15 * 60 + 30
+
+
+def _is_us_market() -> bool:
+    """미국 장 여부 (서머타임 자동 감지)."""
+    now = datetime.now(KST)
+    if now.weekday() >= 5:
+        return False
+    t = now.hour * 60 + now.minute
+    # 서머타임(3~11월): 22:30~05:00 / 동절기: 23:30~06:00
+    import pytz
+    eastern = pytz.timezone("America/New_York")
+    now_et  = now.astimezone(eastern)
+    dst     = bool(now_et.dst())
+    if dst:
+        return t >= 22 * 60 + 30 or t <= 5 * 60
+    else:
+        return t >= 23 * 60 + 30 or t <= 6 * 60
+
+
+# ─────────────────────────────────────────────
+# 급등주 10분 스캔
+# ─────────────────────────────────────────────
+
+def scan_growth_signals():
+    """
+    10분마다 실행 — 한국장 또는 미국장 시간 중에만 스캔.
+    봇이 활성화된 경우에만 동작.
+    """
+    if not _check_activation():
+        return
+
+    if not (_is_kr_market() or _is_us_market()):
+        return
+
+    now = datetime.now(KST)
+    logger.info("급등주 신호 스캔 (%s)", now.strftime("%H:%M"))
+
+    growth_cash = 10_000_000 * GROWTH_ASSET_RATIO
+    if KIS_APP_KEY:
+        try:
+            t           = KISTrader()
+            total_asset = _get_total_asset(t)
+            growth_cash = total_asset * GROWTH_ASSET_RATIO
+        except Exception as e:
+            logger.warning("총 자산 조회 실패: %s", e)
+
+    from data_fetcher import fetch_ohlcv as _fetch
+    signals = scan_all(STOCKS, lambda tk: _fetch(tk, period_years=1))
+
+    if not signals:
+        logger.debug("급등주 신호 없음")
+        return
+
+    logger.info("신호 발생: %d개 종목", len(signals))
+    for sig in signals:
+        send_signal_alert(sig, growth_cash)
+
+
+# ─────────────────────────────────────────────
+# 월간 리밸런싱
+# ─────────────────────────────────────────────
+
+def run_monthly_rebalance():
+    """매월 1일 오전 8시 30분 실행 — 안전자산 비중 재조정."""
+    if not is_bot_active():
+        return
+
+    now = datetime.now(KST)
+    if now.weekday() >= 5:
+        return
+
+    logger.info("월간 리밸런싱 시작")
+    try:
+        from portfolio.rebalancer import run_monthly_rebalance as _rebalance
+
+        holdings = {}
+        total_asset = 10_000_000
+        if KIS_APP_KEY:
+            t        = KISTrader()
+            balance  = t.get_balance()
+            cash     = t.get_available_cash()
+            kr_val   = sum(h["qty"] * h["avg_price"] for h in balance)
+            holdings = {
+                h["stock_code"]: {"qty": h["qty"], "avg_price": h["avg_price"]}
+                for h in balance
+            }
+
+            # 미국주식 잔고 포함 (통합증거금)
+            try:
+                us_balance = t.get_us_balance()
+                for h in us_balance:
+                    sym = h["symbol"]
+                    # USD 평가액을 원화로 환산 (근사치 1400원/달러)
+                    usd_val = h["qty"] * h["avg_price"]
+                    holdings[sym] = {"qty": h["qty"], "avg_price": h["avg_price"], "currency": "USD"}
+                    kr_val += usd_val * 1400
+            except Exception as e:
+                logger.warning("미국주식 잔고 조회 실패 (리밸런싱 제외): %s", e)
+
+            total_asset = cash + kr_val
+
+        _rebalance(total_asset, holdings)
+    except Exception as e:
+        logger.error("월간 리밸런싱 실패: %s", e)
+        send_telegram(f"⚠️ 월간 리밸런싱 오류: {e}")
+
+
+def main():
+    logger.info("스케줄러 시작")
+
+    # 기존 보유 종목 기록 (최초 1회)
+    _init_legacy_tickers()
+
+    # 한국장 5분 간격 매매 루프 (09:05 ~ 15:25)
     times = []
     h, m = 9, 5
     while (h, m) <= (15, 25):
@@ -326,10 +550,23 @@ def main():
     for t in times:
         schedule.every().day.at(t).do(run_priority_loop)
 
+    # 고정 스케줄
     schedule.every().day.at("08:00").do(send_morning_briefing)
     schedule.every().day.at("15:00").do(send_daily_summary)
 
-    logger.info("총 %d개 시간대 등록 완료 (+ 08:00 모닝브리핑 / 15:00 일일 리포트)", len(times))
+    # 급등주 10분 스캔 (장중 자동 필터링)
+    schedule.every(10).minutes.do(scan_growth_signals)
+
+    # 월간 리밸런싱 (매월 1일 08:30)
+    schedule.every().day.at("08:30").do(
+        lambda: run_monthly_rebalance() if datetime.now(KST).day == 1 else None
+    )
+
+    logger.info(
+        "등록 완료: 매매루프 %d개 / 08:00 모닝브리핑 / 15:00 일일리포트 / "
+        "10분 급등주스캔 / 매월 1일 08:30 리밸런싱",
+        len(times),
+    )
 
     while True:
         schedule.run_pending()

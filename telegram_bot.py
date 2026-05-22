@@ -20,10 +20,13 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
 from config import TELEGRAM_BOT_TOKEN, STOCKS, MA_SHORT, MA_LONG, RSI_PERIOD
-from gpt_agent import ask as gpt_ask, clear_history as gpt_clear
+from langchain_agent import ask as gpt_ask, clear_history as gpt_clear
 from data_fetcher import fetch_ohlcv
 from indicators import add_all_indicators, detect_crossover
 from strategy import generate_signals, get_latest_signal
+
+# 급등주 신호 대기 중인 주문 {user_id: signal_dict}
+_pending_signals: dict[int, dict] = {}
 
 logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -550,6 +553,215 @@ async def cmd_sellall(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 # ─────────────────────────────────────────────
+# /portfolio — 안전자산 포트폴리오 현황
+# ─────────────────────────────────────────────
+async def cmd_portfolio(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("⏳ 포트폴리오 현황 조회 중...")
+    try:
+        from portfolio.safe_portfolio import format_rebalance_report
+        from trader import KISTrader
+        from config import KIS_APP_KEY
+
+        holdings = {}
+        total_asset = 0.0
+        if KIS_APP_KEY:
+            t = KISTrader()
+            balance = t.get_balance()
+            cash = t.get_available_cash()
+            for h in balance:
+                holdings[h["stock_code"]] = {"qty": h["qty"], "avg_price": h["avg_price"]}
+                total_asset += h["qty"] * h["avg_price"]
+            total_asset += cash
+
+        if total_asset <= 0:
+            total_asset = 10_000_000  # 시뮬레이션 기본값
+
+        report = format_rebalance_report(holdings, total_asset)
+        await update.message.reply_text(report, parse_mode="HTML")
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ 포트폴리오 조회 실패: {e}")
+
+
+# ─────────────────────────────────────────────
+# /scanstocks — 급등주 수동 스캔
+# ─────────────────────────────────────────────
+async def cmd_scanstocks(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("🔍 급등주 스캔 시작... (잠시 후 결과를 보내드립니다)")
+    try:
+        loop = asyncio.get_event_loop()
+
+        def _scan():
+            from signals.scanner import scan_all
+            from signals.alert import send_signal_alert
+            from config import KIS_APP_KEY, GROWTH_ASSET_RATIO
+            from data_fetcher import fetch_ohlcv
+
+            growth_cash = 3_000_000  # 시뮬레이션 기본값
+            if KIS_APP_KEY:
+                try:
+                    from trader import KISTrader
+                    t = KISTrader()
+                    cash = t.get_available_cash()
+                    balance = t.get_balance()
+                    total = cash + sum(h["qty"] * h["avg_price"] for h in balance)
+                    growth_cash = total * GROWTH_ASSET_RATIO
+                except Exception:
+                    pass
+
+            stocks = read_stocks_from_config()
+            signals = scan_all(stocks, lambda t: fetch_ohlcv(t, period_years=1))
+            return signals, growth_cash
+
+        signals, growth_cash = await loop.run_in_executor(None, _scan)
+
+        if not signals:
+            await update.message.reply_text("✅ 스캔 완료 — 조건 충족 신호 없음")
+        else:
+            await update.message.reply_text(f"🚨 <b>{len(signals)}개 신호 발견!</b>", parse_mode="HTML")
+            for sig in signals:
+                from signals.alert import build_signal_message
+                msg = build_signal_message(sig, growth_cash)
+                _pending_signals[update.effective_user.id] = sig
+                await update.message.reply_text(msg, parse_mode="HTML")
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ 스캔 실패: {e}")
+
+
+# ─────────────────────────────────────────────
+# /buysignal_{TICKER} — 급등주 매수 확정
+# ─────────────────────────────────────────────
+async def cmd_buysignal(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    signal = _pending_signals.get(user_id)
+    if not signal:
+        await update.message.reply_text("⚠️ 대기 중인 신호가 없습니다. /scanstocks 로 다시 스캔하세요.")
+        return
+
+    await update.message.reply_text(f"⏳ {signal.get('name', signal['ticker'])} 매수 중...")
+    try:
+        from config import KIS_APP_KEY, GROWTH_ASSET_RATIO
+        from portfolio.kelly import position_size
+
+        growth_cash = 3_000_000
+        if KIS_APP_KEY:
+            from trader import KISTrader
+            t = KISTrader()
+            cash = t.get_available_cash()
+            balance = t.get_balance()
+            total = cash + sum(h["qty"] * h["avg_price"] for h in balance)
+            growth_cash = total * GROWTH_ASSET_RATIO
+
+        price = signal["current_price"]
+        qty, kelly_f, amount = position_size(
+            growth_cash, signal["win_prob"], signal["avg_win"], signal["avg_loss"], price
+        )
+
+        if qty <= 0:
+            await update.message.reply_text("⚠️ 켈리 공식 기준 매수 수량 0주 — 자금 부족 또는 조건 미달")
+            return
+
+        ticker = signal["ticker"]
+        is_us = not (ticker.endswith(".KS") or ticker.endswith(".KQ") or ticker.isdigit())
+        stock_code = ticker.replace(".KS", "").replace(".KQ", "")
+
+        if KIS_APP_KEY:
+            from trader import KISTrader
+            t = KISTrader()
+            if is_us:
+                t.buy_us(stock_code, qty)
+            else:
+                t.buy(stock_code.replace(".", ""), qty)
+
+        from signals.alert import build_buy_confirm_message
+        from trade_logger import log_buy
+        log_buy(ticker, signal.get("name", ticker), price, qty, strategy="ML급등주")
+        msg = build_buy_confirm_message(signal, qty, price)
+        await update.message.reply_text(msg, parse_mode="HTML")
+        _pending_signals.pop(user_id, None)
+
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ 매수 실패: {e}")
+
+
+# ─────────────────────────────────────────────
+# /skipsignal — 신호 패스
+# ─────────────────────────────────────────────
+async def cmd_skipsignal(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    signal = _pending_signals.pop(user_id, None)
+    name = signal.get("name", signal["ticker"]) if signal else "신호"
+    await update.message.reply_text(f"❌ {name} 신호 패스했습니다.")
+
+
+# ─────────────────────────────────────────────
+# /tradestats — 매매 이력 통계
+# ─────────────────────────────────────────────
+async def cmd_tradestats(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    from trade_logger import format_stats_message, _send_csv_to_telegram
+    await update.message.reply_text(format_stats_message(), parse_mode="HTML")
+    _send_csv_to_telegram("📎 전체 매매 이력")
+
+
+# ─────────────────────────────────────────────
+# /backtest — 최근 1개월 ML 백테스트
+# ─────────────────────────────────────────────
+async def cmd_backtest(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    stocks = read_stocks_from_config()
+    await update.message.reply_text(
+        f"⏳ 1개월 ML 백테스트 시작 ({len(stocks)}종목)\n"
+        f"수 분이 소요됩니다..."
+    )
+    loop = asyncio.get_event_loop()
+    try:
+        result = await loop.run_in_executor(
+            None,
+            lambda: __import__("backtest_ml").run_backtest(stocks)
+        )
+        if len(result) > 4000:
+            for i in range(0, len(result), 4000):
+                await update.message.reply_text(result[i:i+4000], parse_mode="HTML")
+        else:
+            await update.message.reply_text(result, parse_mode="HTML")
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ 백테스트 실패: {e}")
+
+
+# ─────────────────────────────────────────────
+# /trainmodel — ML 모델 학습
+# ─────────────────────────────────────────────
+async def cmd_trainmodel(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    stocks = read_stocks_from_config()
+    await update.message.reply_text(
+        f"🤖 ML 모델 학습 시작 ({len(stocks)}개 종목)\n"
+        f"10년치 데이터 다운로드 + XGBoost 학습 중...\n"
+        f"완료까지 수 분이 소요됩니다."
+    )
+
+    def _train():
+        from ml.trainer import train_all
+        return train_all(list(stocks.keys()))
+
+    loop = asyncio.get_event_loop()
+    try:
+        results = await loop.run_in_executor(None, _train)
+        success = {k: v for k, v in results.items() if v}
+        failed  = [k for k, v in results.items() if not v]
+        lines   = [f"✅ <b>모델 학습 완료</b> ({len(success)}/{len(results)}개 성공)\n"]
+        for ticker, m in success.items():
+            name = stocks.get(ticker, ticker)
+            lines.append(
+                f"• {name}: acc={m['accuracy']:.3f} | "
+                f"avg_win=+{m['avg_win']*100:.1f}% | "
+                f"avg_loss=-{m['avg_loss']*100:.1f}%"
+            )
+        if failed:
+            lines.append(f"\n❌ 실패: {', '.join(failed)}")
+        await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ 모델 학습 실패: {e}")
+
+
+# ─────────────────────────────────────────────
 # 봇 실행
 # ─────────────────────────────────────────────
 def main():
@@ -571,6 +783,18 @@ def main():
     app.add_handler(CommandHandler("help",         cmd_help))
     app.add_handler(CommandHandler("ask",          cmd_ask))
     app.add_handler(CommandHandler("reset",        cmd_reset))
+    # 퀀트 / ML 커맨드
+    app.add_handler(CommandHandler("portfolio",    cmd_portfolio))
+    app.add_handler(CommandHandler("scanstocks",   cmd_scanstocks))
+    app.add_handler(CommandHandler("skipsignal",   cmd_skipsignal))
+    app.add_handler(CommandHandler("trainmodel",   cmd_trainmodel))
+    app.add_handler(CommandHandler("tradestats",   cmd_tradestats))
+    app.add_handler(CommandHandler("backtest",     cmd_backtest))
+    # /buysignal_{TICKER} — 패턴 매칭으로 처리
+    app.add_handler(MessageHandler(
+        filters.TEXT & filters.Regex(r"^/buysignal_"),
+        cmd_buysignal,
+    ))
     # 커맨드가 아닌 일반 텍스트 → GPT (CommandHandler보다 나중에 등록해야 함)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
