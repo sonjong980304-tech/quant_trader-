@@ -1,0 +1,23 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // .tool_response.filePath // \"\"' | { read -r f; echo \"$f\" | grep -q '\\.py$' && launchctl unload ~/Library/LaunchAgents/com.quant.telegrambot.plist && launchctl load ~/Library/LaunchAgents/com.quant.telegrambot.plist; } 2>/dev/null || true",
+            "statusMessage": "텔레그램 봇 재시작 중...",
+            "async": true
+          },
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // .tool_response.filePath // \"\"' | bash /Users/gyuyeong/quant_trader/.claude/git-autopush.sh",
+            "statusMessage": "GitHub 자동 푸시 중...",
+            "async": true
+          }
+        ]
+      }
+    ]
+  }
+}
