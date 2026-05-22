@@ -34,6 +34,7 @@ from notifier import (
     send_telegram, build_volume_surge_message, build_daily_summary_message,
 )
 from news_fetcher import fetch_naver_news
+from morning_briefer import send_morning_briefing
 from conditional_orders import check_and_execute as check_cond_orders
 
 KST      = pytz.timezone("Asia/Seoul")
@@ -325,9 +326,10 @@ def main():
     for t in times:
         schedule.every().day.at(t).do(run_priority_loop)
 
+    schedule.every().day.at("08:00").do(send_morning_briefing)
     schedule.every().day.at("15:00").do(send_daily_summary)
 
-    logger.info("총 %d개 시간대 등록 완료 (+ 15:00 일일 리포트)", len(times))
+    logger.info("총 %d개 시간대 등록 완료 (+ 08:00 모닝브리핑 / 15:00 일일 리포트)", len(times))
 
     while True:
         schedule.run_pending()
