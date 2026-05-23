@@ -6,10 +6,11 @@
 ## 자동 훅 (`.claude/settings.json`)
 - `.py` / `.md` 파일 수정 시 → **GitHub 자동 커밋·푸시** (`.claude/git-autopush.sh`)
 - `.py` 파일 수정 시 → 텔레그램 봇 자동 재시작 (`com.quant.telegrambot.plist`)
+- `.py` 파일 수정 시 → **README.md 자동 업데이트** (`.claude/readme-update.sh`) — git diff 기반으로 Claude가 변경 내용만 반영
 
 ## 훅 사용 규칙 (반드시 준수)
 1. **수동 git commit / git push 금지** — 훅이 자동 처리하므로 직접 실행하지 않는다
-2. **코드 수정 시 README.md도 함께 업데이트** — 새 기능·구조 변경이 있으면 같은 세션에서 README도 수정해야 훅이 함께 반영한다
+2. README.md 수동 업데이트 불필요 — `.py` 수정 시 훅이 자동 반영
 3. 봇 재시작도 수동으로 할 필요 없음 — 훅이 자동 처리
 
 ## 주요 파일
