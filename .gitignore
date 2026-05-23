@@ -10,3 +10,4 @@ results/
 stocks.py
 .omc/
 conditional_orders.json
+!docs/*.png
