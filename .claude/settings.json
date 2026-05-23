@@ -15,6 +15,12 @@
             "command": "jq -r '.tool_input.file_path // .tool_response.filePath // \"\"' | bash /Users/gyuyeong/quant_trader/.claude/git-autopush.sh",
             "statusMessage": "GitHub 자동 푸시 중...",
             "async": true
+          },
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // .tool_response.filePath // \"\"' | bash /Users/gyuyeong/quant_trader/.claude/readme-update.sh",
+            "statusMessage": "README 자동 업데이트 중...",
+            "async": true
           }
         ]
       }
