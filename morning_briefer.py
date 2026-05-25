@@ -18,6 +18,7 @@ from tavily import TavilyClient
 
 from config import STOCKS, OPENAI_API_KEY, TELEGRAM_CHAT_ID
 from notifier import send_telegram
+from market_calendar import is_kr_trading_day
 
 logger = logging.getLogger(__name__)
 KST    = pytz.timezone("Asia/Seoul")
@@ -194,7 +195,7 @@ Context Recall이란: 검색된 컨텍스트의 핵심 정보 중 실제 답변�
 def send_morning_briefing():
     """평일 오전 8시 자동 실행 — 모닝 브리핑 수집·생성·평가 후 텔레그램 전송"""
     now = datetime.now(KST)
-    if now.weekday() >= 5:
+    if not is_kr_trading_day(now.date()):
         return
 
     logger.info("모닝 브리핑 시작 (%s)", now.strftime("%Y-%m-%d %H:%M"))

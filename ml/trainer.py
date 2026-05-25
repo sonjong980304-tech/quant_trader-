@@ -49,32 +49,63 @@ def fetch_5y(ticker: str) -> pd.DataFrame:
 
 def retrain_daily() -> dict:
     """
-    매일 07:30 실행 — 전체 관심 종목을 최근 2년 데이터로 재학습.
+    매일 07:30 실행 — KRX 상위 100 + US 상위 50 유니버스 종목을 병렬 재학습.
+    유니버스 조회 실패 시 관심종목(STOCKS+US_STOCKS)으로 폴백.
     반환: {ticker: metrics or None}
     """
-    from config import STOCKS, US_STOCKS
+    from concurrent.futures import ThreadPoolExecutor
     from ml.model import train
 
-    tickers = list(dict.fromkeys(list(STOCKS.keys()) + list(US_STOCKS.keys())))
-    logger.info("일일 재학습 시작: %d개 종목", len(tickers))
-    results = {}
-    for ticker in tickers:
+    tickers_dict: dict = {}
+
+    try:
+        from signals.krx_universe import get_krx_candidates
+        kr = get_krx_candidates(top_n=100)
+        tickers_dict.update(kr)
+        logger.info("KRX 유니버스: %d개", len(kr))
+    except Exception as e:
+        logger.warning("KRX 유니버스 조회 실패: %s", e)
+
+    try:
+        from signals.us_universe import get_us_candidates
+        us_count_before = len(tickers_dict)
+        us = get_us_candidates(top_n=50)
+        tickers_dict.update(us)
+        logger.info("US 유니버스: %d개", len(tickers_dict) - us_count_before)
+    except Exception as e:
+        logger.warning("US 유니버스 조회 실패: %s", e)
+
+    if not tickers_dict:
+        from config import STOCKS, US_STOCKS
+        tickers_dict = {**STOCKS, **US_STOCKS}
+        logger.warning("유니버스 조회 실패 — 관심종목 %d개로 폴백", len(tickers_dict))
+
+    tickers = list(tickers_dict.keys())
+    logger.info("일일 재학습 시작: %d개 종목 (병렬 8스레드)", len(tickers))
+
+    def _train_one(ticker: str):
         try:
             df = fetch_5y(ticker)
             _, metrics = train(df, ticker)
-            results[ticker] = metrics
             logger.info("  [OK] %s acc=%.3f auc=%.3f", ticker,
                         metrics["accuracy"], metrics["auc"])
+            return ticker, metrics
         except Exception as e:
             logger.error("  [FAIL] %s: %s", ticker, e)
-            results[ticker] = None
+            return ticker, None
+
+    results = {}
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        for ticker, metrics in pool.map(_train_one, tickers):
+            results[ticker] = metrics
+
     ok   = sum(1 for v in results.values() if v)
     fail = len(results) - ok
     logger.info("일일 재학습 완료: 성공 %d / 실패 %d", ok, fail)
     return results
 
 
-def train_ticker(ticker: str) -> dict | None:
+def train_ticker(ticker: str):
     """단일 종목 학습. 성공 시 metrics 반환, 실패 시 None."""
     from ml.model import train
     try:
