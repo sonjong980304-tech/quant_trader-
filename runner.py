@@ -30,6 +30,7 @@ from notifier import send_telegram, build_daily_summary_message
 from morning_briefer import send_morning_briefing
 from signals.scanner import scan_all
 from signals.alert import send_signal_alert
+from market_calendar import is_kr_trading_day
 
 KST      = pytz.timezone("Asia/Seoul")
 LOG_FILE = "logs/trader.log"
@@ -172,7 +173,7 @@ def _append_today_bar(daily_df: pd.DataFrame, minute_df) -> pd.DataFrame:
 def send_daily_summary():
     """오후 3시 종목별 일일 기술적 분석 리포트를 텔레그램으로 전송."""
     now = datetime.now(KST)
-    if now.weekday() >= 5:
+    if not is_kr_trading_day(now.date()):
         return
 
     logger.info("일일 기술적 분석 리포트 전송 시작")
@@ -301,12 +302,128 @@ def is_bot_active() -> bool:
 
 
 # ─────────────────────────────────────────────
+# ML 포지션 추적 (익절 / 7거래일 자동 청산)
+# ─────────────────────────────────────────────
+
+def save_ml_position(ticker: str, name: str, qty: int, entry_price: float,
+                     avg_win: float, is_us: bool = False):
+    """매수 확정 시 ML 포지션 저장."""
+    state = _load_state()
+    positions = state.setdefault("ml_positions", {})
+    target_price = entry_price * (1 + avg_win)
+    stop_price   = entry_price * 0.93  # 손절 -7%
+    positions[ticker] = {
+        "ticker":       ticker,
+        "name":         name,
+        "qty":          qty,
+        "entry_price":  round(entry_price, 4),
+        "target_price": round(target_price, 4),
+        "stop_price":   round(stop_price, 4),
+        "entry_date":   datetime.now(KST).strftime("%Y-%m-%d"),
+        "is_us":        is_us,
+    }
+    _save_state(state)
+    logger.info("ML 포지션 저장: %s qty=%d entry=%.2f target=%.2f stop=%.2f",
+                ticker, qty, entry_price, target_price, stop_price)
+
+
+def _get_current_price(ticker: str):
+    """현재가 조회 (yfinance fast_info)."""
+    try:
+        info = yf.Ticker(ticker).fast_info
+        return float(info["lastPrice"])
+    except Exception:
+        return None
+
+
+def _trading_days_elapsed(entry_date_str: str) -> int:
+    """입력 날짜부터 오늘까지 거래일(평일) 수."""
+    from datetime import date as date_cls
+    start = date_cls.fromisoformat(entry_date_str)
+    today = date_cls.today()
+    days  = 0
+    d     = start
+    while d < today:
+        d += timedelta(days=1)
+        if d.weekday() < 5:
+            days += 1
+    return days
+
+
+def check_ml_positions():
+    """
+    5분마다 실행 — ML 포지션 익절 / 손절 / 7거래일 자동 청산 체크.
+    - 현재가 >= target_price  → 익절 매도
+    - 현재가 <= stop_price    → 손절 매도 (-7%)
+    - 7거래일 경과             → 강제 청산
+    """
+    state     = _load_state()
+    positions = state.get("ml_positions", {})
+    if not positions:
+        return
+
+    to_remove = []
+    for ticker, pos in positions.items():
+        try:
+            cur_price  = _get_current_price(ticker)
+            elapsed    = _trading_days_elapsed(pos["entry_date"])
+            qty        = pos["qty"]
+            name       = pos.get("name", ticker)
+            target     = pos["target_price"]
+            stop       = pos.get("stop_price", pos["entry_price"] * 0.93)
+            is_us      = pos.get("is_us", False)
+
+            reason = None
+            emoji  = "⏰"
+            if cur_price and cur_price >= target:
+                reason = f"익절 (현재가 {cur_price:.2f} ≥ 목표 {target:.2f})"
+                emoji  = "✅"
+            elif cur_price and cur_price <= stop:
+                reason = f"손절 (현재가 {cur_price:.2f} ≤ 손절가 {stop:.2f})"
+                emoji  = "🔴"
+            elif elapsed >= 7:
+                reason = f"7거래일 경과 ({elapsed}일)"
+
+            if reason is None:
+                continue
+
+            # 매도 실행
+            logger.info("[%s] 자동 매도 — %s", ticker, reason)
+            if KIS_APP_KEY:
+                t = KISTrader()
+                code = ticker.replace(".KS", "").replace(".KQ", "")
+                if is_us:
+                    t.sell_us(code, qty)
+                else:
+                    t.sell(code, qty)
+
+            pnl = ((cur_price or pos["entry_price"]) - pos["entry_price"]) / pos["entry_price"] * 100
+            send_telegram(
+                f"{emoji} <b>{name} ({ticker})</b>\n"
+                f"사유: {reason}\n"
+                f"수량: {qty}주 | 손익: {pnl:+.2f}%"
+            )
+            to_remove.append(ticker)
+
+        except Exception as e:
+            logger.error("[%s] 자동 청산 실패: %s", ticker, e)
+
+    if to_remove:
+        for t in to_remove:
+            positions.pop(t, None)
+        state["ml_positions"] = positions
+        _save_state(state)
+
+
+# ─────────────────────────────────────────────
 # 장 시간 (한국 / 미국)
 # ─────────────────────────────────────────────
 
 def _is_kr_market() -> bool:
     now = datetime.now(KST)
     if now.weekday() >= 5:
+        return False
+    if not is_kr_trading_day(now.date()):
         return False
     t = now.hour * 60 + now.minute
     return 9 * 60 <= t <= 15 * 60 + 30
@@ -403,9 +520,9 @@ def scan_growth_signals():
 # ─────────────────────────────────────────────
 
 def retrain_models():
-    """매일 07:30 실행 — 전체 종목 ML 모델 최신 데이터로 재학습."""
+    """매일 07:30 실행 — KRX+US 유니버스 ML 모델 재학습."""
     now = datetime.now(KST)
-    if now.weekday() >= 5:
+    if not is_kr_trading_day(now.date()):
         return
     logger.info("ML 일일 재학습 시작")
     try:
@@ -429,7 +546,7 @@ def run_monthly_rebalance():
         return
 
     now = datetime.now(KST)
-    if now.weekday() >= 5:
+    if not is_kr_trading_day(now.date()):
         return
 
     logger.info("월간 리밸런싱 시작")
@@ -484,6 +601,9 @@ def main():
     # ML 급등주 5분 스캔 (한국장 + 미국장 자동 필터링)
     schedule.every(5).minutes.do(scan_growth_signals)
 
+    # ML 포지션 자동 청산 (익절 / 7거래일 강제)
+    schedule.every(5).minutes.do(check_ml_positions)
+
     # 월간 리밸런싱 (매월 1일 08:30)
     schedule.every().day.at("08:30").do(
         lambda: run_monthly_rebalance() if datetime.now(KST).day == 1 else None
@@ -491,7 +611,7 @@ def main():
 
     logger.info(
         "등록 완료: 07:30 ML재학습 / 08:00 모닝브리핑 / 15:00 일일리포트 / "
-        "5분 ML 급등주스캔 / 매월 1일 08:30 리밸런싱"
+        "5분 ML 급등주스캔+포지션 청산점검 / 매월 1일 08:30 리밸런싱"
     )
 
     while True:
