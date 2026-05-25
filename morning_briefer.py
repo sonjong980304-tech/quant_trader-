@@ -188,121 +188,6 @@ Context Recall이란: 검색된 컨텍스트의 핵심 정보 중 실제 답변�
 
 
 # ─────────────────────────────────────────────
-# 시가총액 랭킹
-# ─────────────────────────────────────────────
-
-# Nasdaq 시가총액 상위 후보 (15개 중 상위 10개 선별)
-_NASDAQ_CANDIDATES = [
-    "AAPL","MSFT","NVDA","AMZN","META","GOOGL","TSLA",
-    "AVGO","COST","NFLX","AMD","ADBE","QCOM","TXN","INTC",
-]
-
-# 다우존스 30 구성 종목
-_DOW_COMPONENTS = [
-    "AAPL","AMGN","AMZN","AXP","BA","CAT","CRM","CSCO","CVX","DIS",
-    "DOW","GS","HD","HON","IBM","JNJ","JPM","KO","MCD","MMM",
-    "MRK","MSFT","NKE","PG","TRV","UNH","V","VZ","WMT","INTC",
-]
-
-
-def _fetch_us_rankings(tickers: list, label: str, flag: str) -> str:
-    """yfinance로 미국 시장 시가총액 Top 10 조회 (병렬)"""
-    import yfinance as yf
-
-    def _info(ticker):
-        try:
-            t    = yf.Ticker(ticker)
-            fi   = t.fast_info
-            name = t.info.get("shortName", ticker)
-            return {
-                "ticker": ticker,
-                "name":   name,
-                "mc":     fi.market_cap or 0,
-                "price":  fi.last_price or 0,
-            }
-        except Exception:
-            return {"ticker": ticker, "name": ticker, "mc": 0, "price": 0}
-
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        results = list(pool.map(_info, tickers))
-
-    results.sort(key=lambda x: x["mc"], reverse=True)
-    lines = [f"<b>{flag} {label} 시가총액 Top 10</b>"]
-    for rank, d in enumerate(results[:10], 1):
-        mc_t = d["mc"] / 1e12
-        lines.append(f"{rank}. {d['name']} ({d['ticker']}) — ${d['price']:,.1f} | ${mc_t:.2f}T")
-    return "\n".join(lines)
-
-
-_KOSPI_CANDIDATES = [
-    "005930.KS","000660.KS","373220.KS","207940.KS","005380.KS",
-    "000270.KS","051910.KS","006400.KS","035420.KS","035720.KS",
-    "068270.KS","105560.KS","055550.KS","086790.KS","096770.KS",
-    "017670.KS","003550.KS","015760.KS","032830.KS","030200.KS",
-]
-
-_KOSDAQ_CANDIDATES = [
-    "247540.KQ","086520.KQ","196170.KQ","041510.KQ","263750.KQ",
-    "122870.KQ","035900.KQ","145020.KQ","357780.KQ","294870.KQ",
-    "028300.KQ","214150.KQ","046310.KQ","900140.KQ","950130.KQ",
-]
-
-
-def _fetch_kr_rankings(tickers: list, label: str) -> str:
-    """yfinance로 한국 시장 시가총액 Top 10 조회"""
-    import yfinance as yf
-
-    def _info(ticker):
-        try:
-            t    = yf.Ticker(ticker)
-            fi   = t.fast_info
-            info = t.info
-            name = info.get("shortName") or info.get("longName", ticker)
-            return {
-                "ticker": ticker,
-                "name":   name,
-                "mc":     fi.market_cap or 0,
-                "price":  fi.last_price or 0,
-            }
-        except Exception:
-            return {"ticker": ticker, "name": ticker, "mc": 0, "price": 0}
-
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        results = list(pool.map(_info, tickers))
-
-    results.sort(key=lambda x: x["mc"], reverse=True)
-    lines = [f"<b>🇰🇷 {label} 시가총액 Top 10</b>"]
-    for rank, d in enumerate(results[:10], 1):
-        mc_t = d["mc"] / 1e12
-        lines.append(f"{rank}. {d['name']} ({d['ticker']}) — {mc_t:.1f}조원")
-    return "\n".join(lines)
-
-
-def fetch_market_rankings() -> str:
-    """KOSPI / KOSDAQ / Nasdaq / 다우존스 시가총액 Top 10 병렬 조회"""
-    tasks = {
-        "kospi":   lambda: _fetch_kr_rankings(_KOSPI_CANDIDATES,  "KOSPI"),
-        "kosdaq":  lambda: _fetch_kr_rankings(_KOSDAQ_CANDIDATES, "KOSDAQ"),
-        "nasdaq":  lambda: _fetch_us_rankings(_NASDAQ_CANDIDATES, "Nasdaq",  "🇺🇸"),
-        "dow":     lambda: _fetch_us_rankings(_DOW_COMPONENTS,    "다우존스", "🇺🇸"),
-    }
-
-    sections = {}
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        futures = {pool.submit(fn): key for key, fn in tasks.items()}
-        for future in as_completed(futures):
-            key = futures[future]
-            try:
-                sections[key] = future.result()
-            except Exception as e:
-                logger.warning("랭킹 조회 실패 (%s): %s", key, e)
-                sections[key] = f"⚠️ {key} 조회 실패"
-
-    order = ["kospi", "kosdaq", "nasdaq", "dow"]
-    return "\n\n".join(sections[k] for k in order if k in sections)
-
-
-# ─────────────────────────────────────────────
 # 메인 진입점
 # ─────────────────────────────────────────────
 
@@ -327,16 +212,11 @@ def send_morning_briefing():
         logger.info("  Context Recall 평가 중...")
         score, evaluation = _evaluate_context_recall(briefing, context)
 
-        # 4. 시가총액 랭킹 조회 (브리핑 평가와 병렬)
-        logger.info("  시가총액 랭킹 조회 중...")
-        rankings = fetch_market_rankings()
-
-        # 5. 텔레그램 전송
+        # 4. 텔레그램 전송
         send_telegram(
             f"🌅 <b>모닝 브리핑</b> {now.strftime('%Y-%m-%d %H:%M')}"
         )
         send_telegram(briefing)
-        send_telegram(f"📊 <b>시가총액 Top 10</b>\n\n{rankings}")
         send_telegram(
             f"📋 <b>브리핑 품질 평가 (Context Recall)</b>\n{evaluation}"
         )
