@@ -517,7 +517,7 @@ Context Recall = (컨텍스트로 근거를 찾을 수 있는 답변 내 주장 
 
     try:
         resp = client.chat.completions.create(
-            model="gpt-4.5-mini",
+            model="gpt-4.1-mini",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=10,
             temperature=0,
