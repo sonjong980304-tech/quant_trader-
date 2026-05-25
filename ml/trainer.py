@@ -47,10 +47,10 @@ def fetch_5y(ticker: str) -> pd.DataFrame:
     return _fetch(ticker, "5y")
 
 
-def retrain_daily() -> dict:
+def retrain_daily(market: str = "all") -> dict:
     """
-    매일 07:30 실행 — KRX 상위 100 + US 상위 50 유니버스 종목을 병렬 재학습.
-    유니버스 조회 실패 시 관심종목(STOCKS+US_STOCKS)으로 폴백.
+    유니버스 종목 병렬 재학습.
+    market: 'kr' (KRX만) | 'us' (US만) | 'all' (둘 다)
     반환: {ticker: metrics or None}
     """
     from concurrent.futures import ThreadPoolExecutor
@@ -58,30 +58,37 @@ def retrain_daily() -> dict:
 
     tickers_dict: dict = {}
 
-    try:
-        from signals.krx_universe import get_krx_candidates
-        kr = get_krx_candidates(top_n=100)
-        tickers_dict.update(kr)
-        logger.info("KRX 유니버스: %d개", len(kr))
-    except Exception as e:
-        logger.warning("KRX 유니버스 조회 실패: %s", e)
+    if market in ("kr", "all"):
+        try:
+            from signals.krx_universe import get_krx_candidates
+            kr = get_krx_candidates(top_n=100)
+            tickers_dict.update(kr)
+            logger.info("KRX 유니버스: %d개", len(kr))
+        except Exception as e:
+            logger.warning("KRX 유니버스 조회 실패: %s", e)
 
-    try:
-        from signals.us_universe import get_us_candidates
-        us_count_before = len(tickers_dict)
-        us = get_us_candidates(top_n=50)
-        tickers_dict.update(us)
-        logger.info("US 유니버스: %d개", len(tickers_dict) - us_count_before)
-    except Exception as e:
-        logger.warning("US 유니버스 조회 실패: %s", e)
+    if market in ("us", "all"):
+        try:
+            from signals.us_universe import get_us_candidates
+            us_before = len(tickers_dict)
+            us = get_us_candidates(top_n=50)
+            tickers_dict.update(us)
+            logger.info("US 유니버스: %d개", len(tickers_dict) - us_before)
+        except Exception as e:
+            logger.warning("US 유니버스 조회 실패: %s", e)
 
     if not tickers_dict:
         from config import STOCKS, US_STOCKS
-        tickers_dict = {**STOCKS, **US_STOCKS}
+        if market == "kr":
+            tickers_dict = dict(STOCKS)
+        elif market == "us":
+            tickers_dict = dict(US_STOCKS)
+        else:
+            tickers_dict = {**STOCKS, **US_STOCKS}
         logger.warning("유니버스 조회 실패 — 관심종목 %d개로 폴백", len(tickers_dict))
 
     tickers = list(tickers_dict.keys())
-    logger.info("일일 재학습 시작: %d개 종목 (병렬 8스레드)", len(tickers))
+    logger.info("재학습 시작: %d개 종목 (market=%s, 병렬 8스레드)", len(tickers), market)
 
     def _train_one(ticker: str):
         try:

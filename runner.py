@@ -519,25 +519,51 @@ def scan_growth_signals():
 # 월간 리밸런싱
 # ─────────────────────────────────────────────
 
-def retrain_models():
-    """매일 07:30 실행 — KRX+US 유니버스 ML 모델 재학습."""
+def retrain_kr_models():
+    """매일 07:30 실행 — KRX 유니버스 ML 모델 재학습."""
     now = datetime.now(KST)
     if not is_kr_trading_day(now.date()):
         return
-    logger.info("ML 일일 재학습 시작")
+    logger.info("KR ML 재학습 시작")
     try:
         from ml.trainer import retrain_daily
-        results = retrain_daily()
+        results = retrain_daily(market="kr")
         ok   = sum(1 for v in results.values() if v)
         fail = len(results) - ok
         send_telegram(
-            f"🤖 <b>ML 모델 재학습 완료</b>\n"
+            f"🤖 <b>KR ML 모델 재학습 완료</b>\n"
             f"성공: {ok}개 / 실패: {fail}개\n"
-            f"{now.strftime('%Y-%m-%d %H:%M')} 기준 최신 데이터 반영"
+            f"{now.strftime('%Y-%m-%d %H:%M')} 기준"
         )
     except Exception as e:
-        logger.error("ML 재학습 실패: %s", e)
-        send_telegram(f"⚠️ ML 재학습 오류: {e}")
+        logger.error("KR ML 재학습 실패: %s", e)
+        send_telegram(f"⚠️ KR ML 재학습 오류: {e}")
+
+
+def retrain_us_models():
+    """미국 증시 시작 직후 실행 — US 유니버스 ML 모델 재학습.
+    22:30(서머) / 23:30(동절기) 양쪽에 스케줄 등록 후
+    ET 09:30~10:00 창에서만 실제 실행."""
+    import pytz
+    eastern = pytz.timezone("America/New_York")
+    now_et  = datetime.now(KST).astimezone(eastern)
+    et_min  = now_et.hour * 60 + now_et.minute
+    if not (9 * 60 + 30 <= et_min <= 10 * 60):
+        return
+    logger.info("US ML 재학습 시작 (미국장 시작 직후)")
+    try:
+        from ml.trainer import retrain_daily
+        results = retrain_daily(market="us")
+        ok   = sum(1 for v in results.values() if v)
+        fail = len(results) - ok
+        send_telegram(
+            f"🤖 <b>US ML 모델 재학습 완료</b>\n"
+            f"성공: {ok}개 / 실패: {fail}개\n"
+            f"{datetime.now(KST).strftime('%Y-%m-%d %H:%M')} 기준"
+        )
+    except Exception as e:
+        logger.error("US ML 재학습 실패: %s", e)
+        send_telegram(f"⚠️ US ML 재학습 오류: {e}")
 
 
 def run_monthly_rebalance():
@@ -594,9 +620,11 @@ def main():
     schedule.clear()
 
     # 고정 스케줄
-    schedule.every().day.at("07:30").do(retrain_models)
+    schedule.every().day.at("07:30").do(retrain_kr_models)
     schedule.every().day.at("08:00").do(send_morning_briefing)
     schedule.every().day.at("15:00").do(send_daily_summary)
+    schedule.every().day.at("22:30").do(retrain_us_models)  # 서머타임 미국장 시작
+    schedule.every().day.at("23:30").do(retrain_us_models)  # 동절기 미국장 시작
 
     # ML 급등주 5분 스캔 (한국장 + 미국장 자동 필터링)
     schedule.every(5).minutes.do(scan_growth_signals)
@@ -610,8 +638,8 @@ def main():
     )
 
     logger.info(
-        "등록 완료: 07:30 ML재학습 / 08:00 모닝브리핑 / 15:00 일일리포트 / "
-        "5분 ML 급등주스캔+포지션 청산점검 / 매월 1일 08:30 리밸런싱"
+        "등록 완료: 07:30 KR재학습 / 08:00 모닝브리핑 / 15:00 일일리포트 / "
+        "22:30·23:30 US재학습 / 5분 ML스캔+포지션청산 / 매월 1일 08:30 리밸런싱"
     )
 
     while True:
