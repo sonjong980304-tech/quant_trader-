@@ -92,7 +92,7 @@ def retrain_daily(market: str = "all") -> dict:
 
     def _train_one(ticker: str):
         try:
-            df = fetch_5y(ticker)
+            df = fetch_10y(ticker)
             _, metrics = train(df, ticker)
             logger.info("  [OK] %s acc=%.3f auc=%.3f", ticker,
                         metrics["accuracy"], metrics["auc"])
