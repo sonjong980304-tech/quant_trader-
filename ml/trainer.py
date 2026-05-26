@@ -88,23 +88,47 @@ def retrain_daily(market: str = "all") -> dict:
         logger.warning("유니버스 조회 실패 — 관심종목 %d개로 폴백", len(tickers_dict))
 
     tickers = list(tickers_dict.keys())
-    logger.info("재학습 시작: %d개 종목 (market=%s, 병렬 8스레드)", len(tickers), market)
+    logger.info("재학습 시작: %d개 종목 (market=%s)", len(tickers), market)
+
+    # ── 1단계: 데이터 다운로드 (직렬) ──────────────────────────────
+    # yfinance는 멀티스레드 환경에서 데이터가 섞이는 버그가 있으므로
+    # 다운로드는 반드시 순서대로 처리
+    logger.info("1단계: 데이터 다운로드 (직렬)")
+    data: dict[str, pd.DataFrame] = {}
+    for ticker in tickers:
+        try:
+            data[ticker] = fetch_10y(ticker)
+        except Exception as e:
+            logger.error("  [FAIL 데이터] %s: %s", ticker, e)
+
+    logger.info("다운로드 완료: %d / %d개", len(data), len(tickers))
+
+    # ── 2단계: 모델 학습 (병렬) ─────────────────────────────────────
+    # 학습은 각 스레드가 독립된 DataFrame을 사용하므로 병렬 안전
+    logger.info("2단계: 모델 학습 (병렬 8스레드)")
 
     def _train_one(ticker: str):
+        df = data.get(ticker)
+        if df is None:
+            return ticker, None
         try:
-            df = fetch_10y(ticker)
             _, metrics = train(df, ticker)
             logger.info("  [OK] %s acc=%.3f auc=%.3f", ticker,
                         metrics["accuracy"], metrics["auc"])
             return ticker, metrics
         except Exception as e:
-            logger.error("  [FAIL] %s: %s", ticker, e)
+            logger.error("  [FAIL 학습] %s: %s", ticker, e)
             return ticker, None
 
     results = {}
     with ThreadPoolExecutor(max_workers=8) as pool:
-        for ticker, metrics in pool.map(_train_one, tickers):
+        for ticker, metrics in pool.map(_train_one, list(data.keys())):
             results[ticker] = metrics
+
+    # 다운로드 실패 종목도 결과에 포함
+    for ticker in tickers:
+        if ticker not in results:
+            results[ticker] = None
 
     ok   = sum(1 for v in results.values() if v)
     fail = len(results) - ok
