@@ -106,7 +106,7 @@ def _cached_fetch(ticker: str, period_years: int = 1) -> pd.DataFrame:
     return df
 
 
-def _prefetch_parallel(tickers: list, period_years: int = 1, max_workers: int = 15):
+def _prefetch_parallel(tickers: list, period_years: int = 1, max_workers: int = 5):
     """캐시 미스(만료·신규) 종목만 병렬 다운로드 후 캐시에 저장."""
     now   = time.time()
     stale = [t for t in tickers
@@ -554,7 +554,7 @@ def scan_growth_signals():
                  if t not in _MINUTE_CACHE or now - _MINUTE_CACHE[t][1] >= _MINUTE_TTL]
     if stale_min:
         logger.info("미국 분봉 병렬 다운로드: %d종목", len(stale_min))
-        with ThreadPoolExecutor(max_workers=10) as ex:
+        with ThreadPoolExecutor(max_workers=5) as ex:
             list(ex.map(_fetch_minute_yf, stale_min))
 
     def _fetch_with_today(ticker: str) -> pd.DataFrame:
