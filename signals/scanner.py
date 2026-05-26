@@ -96,12 +96,16 @@ def detect_triggers(df: pd.DataFrame) -> list[str]:
     """
     if df.index.duplicated().any():
         df = df[~df.index.duplicated(keep="last")].sort_index()
+    if df.columns.duplicated().any():
+        df = df.loc[:, ~df.columns.duplicated(keep="last")]
 
     if len(df) < 61:
         return []
 
     triggers = []
     last = df.iloc[-1]
+    if isinstance(last, pd.DataFrame):
+        last = last.iloc[-1]
 
     # ① 거래량폭발 (장중 시간 보정 적용)
     vol_ma20   = df["Volume"].rolling(20).mean().iloc[-2]
@@ -243,5 +247,5 @@ def scan_all(stocks: dict, fetch_fn) -> list[dict]:
                 result["name"] = name
                 signals.append(result)
         except Exception as e:
-            logger.warning("  [%s] 스캔 실패: %s", ticker, e, exc_info=True)
+            logger.warning("  [%s] 스캔 실패: %s", ticker, e)
     return signals
