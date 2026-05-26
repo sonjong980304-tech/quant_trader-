@@ -190,6 +190,8 @@ def _append_today_bar(daily_df: pd.DataFrame, minute_df) -> pd.DataFrame:
         # 나머지 컬럼은 NaN으로 채워짐 (지표 계산 시 덮어씌워짐)
         daily_df = pd.concat([daily_df, new_row])
 
+    # concat 후 중복 인덱스 제거 (yfinance가 당일 바를 이미 포함한 경우 대비)
+    daily_df = daily_df[~daily_df.index.duplicated(keep="last")]
     return daily_df
 
 
