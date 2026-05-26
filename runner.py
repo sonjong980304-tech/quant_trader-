@@ -518,21 +518,24 @@ def scan_growth_signals():
     tickers = list(stocks_to_scan.keys())
     _prefetch_parallel(tickers)
 
-    # 분봉 병렬 다운로드 (오늘 바 합성용, 5분 TTL)
+    # 미국 주식만 yfinance 분봉 병렬 다운로드 (한국 주식은 KIS API 실시간 사용)
+    us_tickers = [t for t in tickers if not (t.endswith(".KS") or t.endswith(".KQ"))]
     now = time.time()
-    stale_min = [t for t in tickers
+    stale_min = [t for t in us_tickers
                  if t not in _MINUTE_CACHE or now - _MINUTE_CACHE[t][1] >= _MINUTE_TTL]
     if stale_min:
-        logger.info("분봉 병렬 다운로드: %d종목", len(stale_min))
+        logger.info("미국 분봉 병렬 다운로드: %d종목", len(stale_min))
         with ThreadPoolExecutor(max_workers=10) as ex:
             list(ex.map(_fetch_minute_yf, stale_min))
 
     def _fetch_with_today(ticker: str) -> pd.DataFrame:
         df = _cached_fetch(ticker)
-        minute_df = _fetch_minute_yf(ticker)
-        # 한국 주식이고 yfinance 분봉 실패 시 KIS API 실시간 바로 대체
-        if minute_df is None and (ticker.endswith(".KS") or ticker.endswith(".KQ")):
+        if ticker.endswith(".KS") or ticker.endswith(".KQ"):
+            # 한국 주식: KIS API 실시간 바 (yfinance 사용 안 함)
             minute_df = _fetch_kr_realtime_bar(ticker)
+        else:
+            # 미국 주식: yfinance 5분봉
+            minute_df = _fetch_minute_yf(ticker)
         return _append_today_bar(df, minute_df)
 
     signals = scan_all(stocks_to_scan, _fetch_with_today)
