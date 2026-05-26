@@ -263,8 +263,9 @@ def _build_system_prompt() -> str:
         if KIS_APP_KEY:
             t = KISTrader()
             holdings = t.get_balance()
-            cash = t.get_available_cash()
-            cash_text = f"  주문 가능 현금: {cash:,}원"
+            cash  = t.get_available_cash()
+            total = t.get_total_eval_amt()
+            cash_text = f"  주문 가능 현금: {cash:,}원 / 총평가금액(매도대금 포함): {total:,}원"
             if holdings:
                 pos_lines = []
                 for h in holdings:
