@@ -66,6 +66,7 @@ def train(df: pd.DataFrame, ticker: str) -> tuple[object, dict]:
     tscv         = TimeSeriesSplit(n_splits=N_SPLITS)
     oof_preds    = np.zeros(len(X), dtype=int)
     oof_proba    = np.zeros(len(X), dtype=float)
+    last_val_idx = None
 
     for fold, (tr_idx, val_idx) in enumerate(tscv.split(X)):
         X_tr, X_val = X[tr_idx], X[val_idx]
@@ -92,6 +93,7 @@ def train(df: pd.DataFrame, ticker: str) -> tuple[object, dict]:
         )
         oof_preds[val_idx] = fold_model.predict(X_val)
         oof_proba[val_idx] = fold_model.predict_proba(X_val)[:, 1]
+        last_val_idx       = val_idx
         logger.info("  [%s] Fold %d acc=%.3f", ticker, fold + 1,
                     accuracy_score(y_val, oof_preds[val_idx]))
 
@@ -110,6 +112,16 @@ def train(df: pd.DataFrame, ticker: str) -> tuple[object, dict]:
         verbosity         = 0,
     )
     final_model.fit(X, y)
+
+    # Platt Scaling 캘리브레이션 — 마지막 fold 검증 데이터 사용 (시계열 순서 보존)
+    from sklearn.calibration import CalibratedClassifierCV
+    if last_val_idx is not None and len(last_val_idx) >= 20:
+        calibrated_model = CalibratedClassifierCV(
+            final_model, method="sigmoid", cv="prefit"
+        )
+        calibrated_model.fit(X[last_val_idx], y[last_val_idx])
+    else:
+        calibrated_model = final_model
 
     # OOF 메트릭
     valid_mask = oof_proba > 0
@@ -137,7 +149,7 @@ def train(df: pd.DataFrame, ticker: str) -> tuple[object, dict]:
 
     path = _model_path(ticker)
     with open(path, "wb") as f:
-        pickle.dump({"model": final_model, "metrics": metrics}, f)
+        pickle.dump({"model": calibrated_model, "metrics": metrics}, f)
 
     logger.info("[%s] 모델 저장 완료 | acc=%.3f auc=%.3f avg_win=%.1f%% avg_loss=%.1f%%",
                 ticker, acc, auc, avg_win * 100, avg_loss * 100)

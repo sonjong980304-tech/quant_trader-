@@ -56,3 +56,42 @@ def get_krx_candidates(top_n: int = 100) -> dict[str, str]:
 
     logger.info("KRX 전체 후보 종목: %d개", len(candidates))
     return candidates
+
+
+def get_krx_backtest_universe(top_n: int = 200) -> dict[str, str]:
+    """
+    백테스트용 KRX 유니버스 — 시가총액 기준 상위 top_n 종목.
+    장 외 시간에도 동작 (실시간 필터 없음).
+    """
+    try:
+        import FinanceDataReader as fdr
+    except ImportError:
+        logger.warning("FinanceDataReader 미설치")
+        return {}
+
+    candidates: dict[str, str] = {}
+
+    for market, suffix in [("KOSPI", ".KS"), ("KOSDAQ", ".KQ")]:
+        try:
+            df = fdr.StockListing(market)
+            if df is None or df.empty:
+                logger.warning("%s 데이터 없음", market)
+                continue
+
+            # 우선주·스팩 제외 (종목코드가 0으로 끝나지 않으면 우선주)
+            df = df[df["Code"].str.endswith("0")].copy()
+
+            if "Marcap" in df.columns:
+                df = df[df["Marcap"] > 0].nlargest(top_n // 2, "Marcap")
+            else:
+                df = df.head(top_n // 2)
+
+            for _, row in df.iterrows():
+                candidates[f"{row['Code']}{suffix}"] = row["Name"]
+
+            logger.info("%s 백테스트 후보: %d개", market, len(df))
+        except Exception as e:
+            logger.warning("KRX %s 조회 실패: %s", market, e)
+
+    logger.info("KRX 백테스트 유니버스: %d개", len(candidates))
+    return candidates
