@@ -510,6 +510,16 @@ def scan_growth_signals():
 
     logger.info("신호 발생: %d개 종목", len(signals))
     for sig in signals:
+        # 한국 주식은 KIS API 실시간 현재가로 교정 (yfinance 오류 방지)
+        ticker = sig["ticker"]
+        if KIS_APP_KEY and (ticker.endswith(".KS") or ticker.endswith(".KQ")):
+            try:
+                code = ticker.replace(".KS", "").replace(".KQ", "")
+                real_price = KISTrader().get_current_price(code)["price"]
+                if real_price and real_price > 0:
+                    sig["current_price"] = float(real_price)
+            except Exception as e:
+                logger.debug("KIS 현재가 조회 실패 [%s]: %s", ticker, e)
         send_signal_alert(sig, growth_cash)
 
 
