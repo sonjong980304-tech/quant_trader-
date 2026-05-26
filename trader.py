@@ -137,6 +137,9 @@ class KISTrader:
         return {
             "stock_code":  stock_code,
             "price":       int(float(output["stck_prpr"])),   # 현재가
+            "open":        int(float(output.get("stck_oprc", 0))),  # 당일 시가
+            "high":        int(float(output.get("stck_hgpr", 0))),  # 당일 고가
+            "low":         int(float(output.get("stck_lwpr", 0))),  # 당일 저가
             "change":      int(float(output["prdy_vrss"])),   # 전일 대비
             "change_rate": float(output["prdy_ctrt"]),        # 등락률 (%)
             "volume":      int(float(output["acml_vol"])),    # 누적 거래량
