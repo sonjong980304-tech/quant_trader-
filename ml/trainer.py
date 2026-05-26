@@ -7,7 +7,7 @@ trainer.py - 관심종목 전체 XGBoost 모델 일괄 학습
   python -m ml.trainer                   # 전체 STOCKS 학습
   python -m ml.trainer 005930.KS AAPL   # 특정 종목만 학습
 
-학습 데이터: 최근 10년치 일봉 (yfinance)
+학습 데이터: 최근 5년치 일봉 (yfinance)
 저장 위치:   ml/models/{ticker}.pkl
 """
 
@@ -58,10 +58,12 @@ def retrain_daily(market: str = "all") -> dict:
 
     tickers_dict: dict = {}
 
+    # 재학습은 과거 5년치 일봉 기반 → 실시간 스크리닝 불필요
+    # 시가총액 기준 정적 유니버스 사용 (장외 시간에도 안정적으로 동작)
     if market in ("kr", "all"):
         try:
-            from signals.krx_universe import get_krx_candidates
-            kr = get_krx_candidates(top_n=100)
+            from signals.krx_universe import get_krx_backtest_universe
+            kr = get_krx_backtest_universe(top_n=200)
             tickers_dict.update(kr)
             logger.info("KRX 유니버스: %d개", len(kr))
         except Exception as e:
@@ -69,23 +71,13 @@ def retrain_daily(market: str = "all") -> dict:
 
     if market in ("us", "all"):
         try:
-            from signals.us_universe import get_us_candidates
+            from signals.us_universe import get_us_backtest_universe
             us_before = len(tickers_dict)
-            us = get_us_candidates(top_n=50)
+            us = get_us_backtest_universe(top_n=100)
             tickers_dict.update(us)
             logger.info("US 유니버스: %d개", len(tickers_dict) - us_before)
         except Exception as e:
             logger.warning("US 유니버스 조회 실패: %s", e)
-
-    if not tickers_dict:
-        from config import STOCKS, US_STOCKS
-        if market == "kr":
-            tickers_dict = dict(STOCKS)
-        elif market == "us":
-            tickers_dict = dict(US_STOCKS)
-        else:
-            tickers_dict = {**STOCKS, **US_STOCKS}
-        logger.warning("유니버스 조회 실패 — 관심종목 %d개로 폴백", len(tickers_dict))
 
     tickers = list(tickers_dict.keys())
     logger.info("재학습 시작: %d개 종목 (market=%s)", len(tickers), market)
@@ -97,7 +89,7 @@ def retrain_daily(market: str = "all") -> dict:
     data: dict[str, pd.DataFrame] = {}
     for ticker in tickers:
         try:
-            data[ticker] = fetch_10y(ticker)
+            data[ticker] = fetch_5y(ticker)
         except Exception as e:
             logger.error("  [FAIL 데이터] %s: %s", ticker, e)
 
@@ -140,7 +132,7 @@ def train_ticker(ticker: str):
     """단일 종목 학습. 성공 시 metrics 반환, 실패 시 None."""
     from ml.model import train
     try:
-        df = fetch_10y(ticker)
+        df = fetch_5y(ticker)
         _, metrics = train(df, ticker)
         return metrics
     except Exception as e:
