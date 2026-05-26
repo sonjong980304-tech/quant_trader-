@@ -75,25 +75,31 @@ def get_us_candidates(top_n: int = 50) -> dict[str, str]:
 
     logger.info("S&P 500 %d종목 22일 배치 다운로드 중...", len(tickers))
     try:
+        # yfinance 1.x: group_by/threads 제거 → 기본 MultiIndex(field, ticker) 반환
         raw = yf.download(
             tickers,
             period="22d",
             auto_adjust=True,
             progress=False,
-            group_by="ticker",
-            threads=True,
         )
     except Exception as e:
         logger.warning("yfinance 배치 다운로드 실패: %s", e)
         return {}
 
+    # 단일 티커면 MultiIndex 아닐 수 있음
+    is_multi = isinstance(raw.columns, pd.MultiIndex)
+    available = set(raw.columns.get_level_values(1)) if is_multi else set()
+
     vol_ratios: dict[str, float] = {}
 
     for ticker in tickers:
         try:
-            df = raw[ticker].copy() if len(tickers) > 1 else raw.copy()
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = df.columns.get_level_values(0)
+            if is_multi:
+                if ticker not in available:
+                    continue
+                df = raw.xs(ticker, axis=1, level=1).copy()
+            else:
+                df = raw.copy()
             df = df[["Close", "Volume"]].dropna()
             if len(df) < 3:
                 continue
