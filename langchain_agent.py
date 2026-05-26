@@ -94,8 +94,11 @@ def get_account_balance() -> str:
         t       = KISTrader()
         balance = t.get_balance()
         cash    = t.get_available_cash()
+        total   = t.get_total_eval_amt()
         mode    = "모의투자" if IS_MOCK else "실전투자"
-        lines   = [f"[계좌 잔고 — {mode}]", f"주문 가능 현금: {cash:,}원"]
+        lines   = [f"[계좌 잔고 — {mode}]",
+                   f"주문 가능 현금: {cash:,}원",
+                   f"총평가금액(매도대금 포함): {total:,}원"]
 
         if balance:
             lines.append("\n[국내주식]")
@@ -138,8 +141,7 @@ def get_portfolio_status() -> str:
         if KIS_APP_KEY:
             t           = KISTrader()
             balance     = t.get_balance()
-            cash        = t.get_available_cash()
-            total_asset = cash + sum(h["qty"] * h["avg_price"] for h in balance)
+            total_asset = t.get_total_eval_amt()
             holdings    = {h["stock_code"]: {"qty": h["qty"]} for h in balance}
         return format_rebalance_report(holdings, total_asset)
     except Exception as e:
@@ -189,11 +191,12 @@ def _build_system_prompt() -> str:
             t        = KISTrader()
             holdings = t.get_balance()
             cash     = t.get_available_cash()
+            total    = t.get_total_eval_amt()
             pos_text = "\n".join(
                 f"  - {h['name']} ({h['stock_code']}): {h['qty']}주 @ {h['avg_price']:,}원"
                 for h in holdings
             ) or "  (보유 없음)"
-            cash_text = f"  주문 가능 현금: {cash:,}원"
+            cash_text = f"  주문 가능 현금: {cash:,}원 / 총평가금액(매도대금 포함): {total:,}원"
         else:
             pos_text  = "  (KIS 미연결)"
             cash_text = "  (KIS 미연결)"
