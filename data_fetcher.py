@@ -34,6 +34,12 @@ def fetch_ohlcv(ticker: str, period_years: int = 1) -> pd.DataFrame:
     df.index = pd.to_datetime(df.index)
     df.sort_index(inplace=True)
     df = df[~df.index.duplicated(keep="last")]
+    # 컬럼 중복 및 비표준 컬럼 제거 (yfinance 간헐적 오염 방어)
+    if df.columns.duplicated().any():
+        df = df.loc[:, ~df.columns.duplicated(keep="last")]
+    std = [c for c in ["Open", "High", "Low", "Close", "Volume"] if c in df.columns]
+    if std:
+        df = df[std]
     return df
 
 
