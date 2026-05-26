@@ -484,6 +484,13 @@ def scan_growth_signals():
         if not stocks_to_scan:
             stocks_to_scan = US_STOCKS if US_STOCKS else STOCKS
 
+    # 이미 보유 중인 ML 포지션 종목 스캔에서 제외 (당일 중복 매수 방지)
+    held = set(_load_state().get("ml_positions", {}).keys())
+    if held:
+        before = len(stocks_to_scan)
+        stocks_to_scan = {t: n for t, n in stocks_to_scan.items() if t not in held}
+        logger.info("보유 중 종목 제외: %d개 → %d개", before, len(stocks_to_scan))
+
     # 일봉 캐시 미스 종목 병렬 다운로드
     tickers = list(stocks_to_scan.keys())
     _prefetch_parallel(tickers)
