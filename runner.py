@@ -170,6 +170,9 @@ def _append_today_bar(daily_df: pd.DataFrame, minute_df) -> pd.DataFrame:
         return daily_df
 
     daily_df = daily_df.copy()
+    # 컬럼 중복 방어 (yfinance 간헐적 오염)
+    if daily_df.columns.duplicated().any():
+        daily_df = daily_df.loc[:, ~daily_df.columns.duplicated(keep="last")]
 
     if daily_df.index[-1].date() == today:
         # 이미 오늘 행이 있으면 실시간 값으로 덮어씀

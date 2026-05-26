@@ -243,5 +243,5 @@ def scan_all(stocks: dict, fetch_fn) -> list[dict]:
                 result["name"] = name
                 signals.append(result)
         except Exception as e:
-            logger.warning("  [%s] 스캔 실패: %s", ticker, e)
+            logger.warning("  [%s] 스캔 실패: %s", ticker, e, exc_info=True)
     return signals
