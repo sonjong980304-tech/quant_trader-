@@ -143,8 +143,13 @@ def backtest_ticker(ticker: str, name: str) -> dict | None:
     from ml.features import add_features, FEATURE_COLS
 
     trades = []
+    in_position_until = None  # 청산일까지 재진입 차단
 
     for test_date in test_dates:
+        # 보유 중인 포지션 청산 전 재진입 금지
+        if in_position_until and test_date <= in_position_until:
+            continue
+
         day_bars = test_min[test_min.index.date == test_date]
         if len(day_bars) < 5:
             continue
@@ -199,10 +204,27 @@ def backtest_ticker(ticker: str, name: str) -> dict | None:
             if len(future) < HORIZON:
                 break
 
-            exit_price = float(future["Close"].iloc[HORIZON - 1])
-            exit_date  = future.index[HORIZON - 1].date()
-            pnl_pct    = (exit_price - entry_price) / entry_price * 100
+            # 봇과 동일한 청산 로직: 손절(-7%) / 익절(avg_win) / 기간청산(7거래일)
+            exit_price  = None
+            exit_date   = None
+            stop_loss   = entry_price * 0.93
+            take_profit = entry_price * (1 + avg_win)
 
+            for d in range(min(HORIZON, len(future))):
+                day_close = float(future["Close"].iloc[d])
+                day_date  = future.index[d].date()
+                if day_close <= stop_loss or day_close >= take_profit:
+                    exit_price = day_close
+                    exit_date  = day_date
+                    break
+
+            if exit_price is None:
+                exit_price = float(future["Close"].iloc[HORIZON - 1])
+                exit_date  = future.index[HORIZON - 1].date()
+
+            pnl_pct = (exit_price - entry_price) / entry_price * 100
+
+            in_position_until = exit_date  # 청산일까지 재진입 차단
             trades.append({
                 "ticker":      ticker,
                 "name":        name,
