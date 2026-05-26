@@ -245,7 +245,7 @@ _TOOLS = [
 
 def _build_agent(user_id: int) -> AgentExecutor:
     llm = ChatOpenAI(
-        model="gpt-4.5",
+        model="gpt-4.1",
         api_key=OPENAI_API_KEY,
         temperature=0,
     )
@@ -328,7 +328,7 @@ def _eval_recall(context: str, answer: str) -> float:
     )
     try:
         resp = client.chat.completions.create(
-            model="gpt-4.5-mini",
+            model="gpt-4.1-mini",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=10,
             temperature=0,
