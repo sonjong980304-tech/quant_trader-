@@ -33,6 +33,7 @@ def fetch_ohlcv(ticker: str, period_years: int = 1) -> pd.DataFrame:
 
     df.index = pd.to_datetime(df.index)
     df.sort_index(inplace=True)
+    df = df[~df.index.duplicated(keep="last")]
     return df
 
 

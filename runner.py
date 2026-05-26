@@ -59,6 +59,8 @@ def _fetch_minute_yf(ticker: str):
             return None
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
+        # yfinance 1.x 간헐적 중복 타임스탬프 제거
+        df = df[~df.index.duplicated(keep="last")]
         df = df.rename(columns={
             "Open": "open", "High": "high",
             "Low": "low", "Close": "close", "Volume": "volume",
@@ -192,15 +194,28 @@ def _append_today_bar(daily_df: pd.DataFrame, minute_df) -> pd.DataFrame:
 
 
 def send_daily_summary():
-    """오후 3시 종목별 일일 기술적 분석 리포트를 텔레그램으로 전송."""
+    """오후 3시 현재 보유 종목 기준 일일 기술적 분석 리포트를 텔레그램으로 전송."""
     now = datetime.now(KST)
     if not is_kr_trading_day(now.date()):
         return
 
-    logger.info("일일 기술적 분석 리포트 전송 시작")
-    send_telegram(f"📊 <b>일일 기술적 분석 리포트</b>\n{now.strftime('%Y-%m-%d %H:%M')} 기준")
+    ml_positions = _load_state().get("ml_positions", {})
+    if not ml_positions:
+        send_telegram(
+            f"📊 <b>일일 기술적 분석 리포트</b>\n"
+            f"{now.strftime('%Y-%m-%d %H:%M')} 기준\n"
+            f"현재 보유 종목 없음"
+        )
+        return
 
-    for ticker, stock_name in STOCKS.items():
+    logger.info("일일 기술적 분석 리포트 전송 시작")
+    send_telegram(
+        f"📊 <b>일일 기술적 분석 리포트</b> (보유 {len(ml_positions)}종목)\n"
+        f"{now.strftime('%Y-%m-%d %H:%M')} 기준"
+    )
+
+    for ticker, pos_info in ml_positions.items():
+        stock_name = pos_info.get("name", ticker)
         try:
             daily_df = fetch_ohlcv(ticker, period_years=1)
 
@@ -217,7 +232,7 @@ def send_daily_summary():
             daily_df = generate_signals(daily_df)
             sig      = get_latest_signal(daily_df)
             msg      = build_daily_summary_message(
-                stock_name, sig, daily_df, position=positions.get(ticker)
+                stock_name, sig, daily_df, position=pos_info
             )
             send_telegram(msg)
         except Exception as e:
