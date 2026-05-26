@@ -4,9 +4,10 @@ trade_logger.py - 매매 이력 CSV 기록 + 텔레그램 전송
 CSV 컬럼:
   trade_id, ticker, name, side(BUY/SELL),
   entry_date, entry_price, exit_date, exit_price,
-  qty, pnl_amount, pnl_pct, win(1/0), strategy, notes
+  qty, pnl_amount, pnl_pct, win(1/0), strategy, notes,
+  win_prob, avg_win_pct, avg_loss_pct, model_auc
 
-매수 시 → 행 추가 (exit 컬럼 비워둠)
+매수 시 → 행 추가 (exit 컬럼 비워둠, ML 예측값 기록)
 매도 시 → 해당 행 업데이트 (exit 정보 + 손익 계산)
 업데이트마다 CSV 파일을 텔레그램으로 전송.
 """
@@ -33,6 +34,7 @@ _FIELDNAMES = [
     "exit_date",  "exit_price",
     "qty", "pnl_amount", "pnl_pct", "win",
     "strategy", "notes",
+    "win_prob", "avg_win_pct", "avg_loss_pct", "model_auc",
 ]
 
 
@@ -71,29 +73,38 @@ def log_buy(
     qty: int,
     strategy: str = "",
     notes: str = "",
+    win_prob: float = None,
+    avg_win: float = None,
+    avg_loss: float = None,
+    model_auc: float = None,
 ) -> str:
     """
     매수 시 호출. trade_id 반환.
+    win_prob / avg_win / avg_loss / model_auc : ML 예측값 (ML 전략에서만 전달)
     """
     _ensure_csv()
     trade_id   = str(uuid.uuid4())[:8]
     entry_date = datetime.now(KST).strftime("%Y-%m-%d %H:%M")
 
     row = {
-        "trade_id":   trade_id,
-        "ticker":     ticker,
-        "name":       name,
-        "side":       "BUY",
-        "entry_date": entry_date,
+        "trade_id":    trade_id,
+        "ticker":      ticker,
+        "name":        name,
+        "side":        "BUY",
+        "entry_date":  entry_date,
         "entry_price": entry_price,
-        "exit_date":  "",
-        "exit_price": "",
-        "qty":        qty,
-        "pnl_amount": "",
-        "pnl_pct":    "",
-        "win":        "",
-        "strategy":   strategy,
-        "notes":      notes,
+        "exit_date":   "",
+        "exit_price":  "",
+        "qty":         qty,
+        "pnl_amount":  "",
+        "pnl_pct":     "",
+        "win":         "",
+        "strategy":    strategy,
+        "notes":       notes,
+        "win_prob":    round(win_prob * 100, 1) if win_prob is not None else "",
+        "avg_win_pct": round(avg_win * 100, 2)  if avg_win  is not None else "",
+        "avg_loss_pct": round(avg_loss * 100, 2) if avg_loss is not None else "",
+        "model_auc":   round(model_auc, 4)       if model_auc is not None else "",
     }
 
     rows = _read_all()
