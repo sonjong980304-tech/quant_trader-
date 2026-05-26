@@ -51,8 +51,8 @@ def _execute_buy(signal: dict, growth_cash: float) -> tuple[int, float, str]:
         try:
             from trade_logger import log_buy
             log_buy(ticker, signal.get("name", ticker), price, qty, strategy="ML급등주")
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.warning("[TradeLog] 매수 기록 실패 [%s]: %s", ticker, _e)
 
         return qty, price, "ok"
     except Exception as e:

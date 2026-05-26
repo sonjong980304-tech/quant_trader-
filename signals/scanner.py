@@ -18,8 +18,10 @@ import pytz
 
 logger = logging.getLogger(__name__)
 
-MIN_WIN_PROB    = 0.55   # 최소 승률 55%
-MIN_RISK_REWARD = 1.5    # 최소 손익비 1.5
+MIN_WIN_PROB    = 0.65   # 최소 승률 65%
+MIN_RISK_REWARD = 1.5    # 최소 기대값 손익비 (win_prob 가중 기대값 기준)
+MIN_TRIGGERS    = 2      # 기술적 트리거 최소 2개 이상
+MIN_MODEL_AUC   = 0.70   # 최소 모델 예측력 (0.5 = 동전던지기, 0.7+ = 쓸만한 예측)
 
 # 구조적 하락 종목 블랙리스트 — 신호 발생 시 무시
 BLACKLIST: set[str] = {"EL"}
@@ -151,6 +153,11 @@ def scan_ticker(ticker: str, df: pd.DataFrame) -> dict | None:
     if not triggers:
         return None
 
+    if len(triggers) < MIN_TRIGGERS:
+        logger.debug("  [%s] 트리거 %d개 < %d개 — 패스 (%s)",
+                     ticker, len(triggers), MIN_TRIGGERS, triggers)
+        return None
+
     logger.info("  [%s] 트리거 감지: %s — ML 예측 실행", ticker, triggers)
 
     from ml.model import predict
@@ -167,14 +174,26 @@ def scan_ticker(ticker: str, df: pd.DataFrame) -> dict | None:
     if win_prob is None or avg_win is None or avg_loss is None or avg_loss <= 0:
         return None
 
-    risk_reward = avg_win / avg_loss
-
-    if win_prob < MIN_WIN_PROB:
-        logger.debug("  [%s] 승률 %.1f%% < 55%% — 패스", ticker, win_prob * 100)
+    model_auc = pred.get("model_auc", 0.0) or 0.0
+    if model_auc < MIN_MODEL_AUC:
+        logger.debug("  [%s] 모델 AUC %.3f < %.2f — 패스 (예측력 부족)",
+                     ticker, model_auc, MIN_MODEL_AUC)
         return None
 
+    if win_prob < MIN_WIN_PROB:
+        logger.debug("  [%s] 승률 %.1f%% < %.0f%% — 패스",
+                     ticker, win_prob * 100, MIN_WIN_PROB * 100)
+        return None
+
+    # 기대값 기반 손익비: (평균수익 × 승률) / (평균손실 × 패률)
+    # 기존 avg_win/avg_loss 단순 비율보다 win_prob이 낮을수록 엄격해짐
+    expected_win  = avg_win  * win_prob
+    expected_loss = avg_loss * (1 - win_prob)
+    risk_reward   = expected_win / expected_loss if expected_loss > 0 else 0.0
+
     if risk_reward < MIN_RISK_REWARD:
-        logger.debug("  [%s] 손익비 %.2f < 1.5 — 패스", ticker, risk_reward)
+        logger.debug("  [%s] 기대값 손익비 %.2f < %.1f — 패스",
+                     ticker, risk_reward, MIN_RISK_REWARD)
         return None
 
     logger.info("  [%s] 🚨 신호 확정! 승률=%.1f%% 손익비=%.2f",

@@ -10,4 +10,7 @@ results/
 stocks.py
 .omc/
 conditional_orders.json
+ml/models/
+trade_history.csv
+state.json
 !docs/*.png
