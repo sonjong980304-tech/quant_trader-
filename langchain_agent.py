@@ -285,6 +285,7 @@ def _build_agent(user_id: int) -> AgentExecutor:
         verbose=False,
         handle_parsing_errors=True,
         max_iterations=5,
+        return_intermediate_steps=True,
     )
 
 
