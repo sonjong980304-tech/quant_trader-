@@ -349,7 +349,13 @@ def save_ml_position(ticker: str, name: str, qty: int, entry_price: float,
 
 
 def _get_current_price(ticker: str):
-    """현재가 조회 (yfinance fast_info)."""
+    """현재가 조회 (한국 주식: KIS API, 미국 주식: yfinance)."""
+    if KIS_APP_KEY and (ticker.endswith(".KS") or ticker.endswith(".KQ")):
+        try:
+            code = ticker.replace(".KS", "").replace(".KQ", "")
+            return float(KISTrader().get_current_price(code)["price"])
+        except Exception:
+            pass
     try:
         info = yf.Ticker(ticker).fast_info
         return float(info["lastPrice"])
@@ -410,6 +416,7 @@ def check_ml_positions():
 
             # 매도 실행
             logger.info("[%s] 자동 매도 — %s", ticker, reason)
+            sell_price = cur_price or pos["entry_price"]
             if KIS_APP_KEY:
                 t = KISTrader()
                 code = ticker.replace(".KS", "").replace(".KQ", "")
@@ -418,7 +425,14 @@ def check_ml_positions():
                 else:
                     t.sell(code, qty)
 
-            pnl = ((cur_price or pos["entry_price"]) - pos["entry_price"]) / pos["entry_price"] * 100
+            # CSV 매도 기록
+            try:
+                from trade_logger import log_sell
+                log_sell(ticker, sell_price, qty=qty, notes=reason)
+            except Exception as e:
+                logger.warning("[TradeLog] 매도 기록 실패 [%s]: %s", ticker, e)
+
+            pnl = (sell_price - pos["entry_price"]) / pos["entry_price"] * 100
             send_telegram(
                 f"{emoji} <b>{name} ({ticker})</b>\n"
                 f"사유: {reason}\n"
