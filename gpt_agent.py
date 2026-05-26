@@ -398,7 +398,7 @@ def ask(user_id: int, question: str) -> str:
 
     try:
         resp = client.chat.completions.create(
-            model="gpt-4.5",
+            model="gpt-4.1",
             messages=messages,
             tools=_TOOLS,
             tool_choice="auto",
@@ -472,7 +472,7 @@ def ask(user_id: int, question: str) -> str:
 
             # 툴 결과 포함해서 최종 답변 생성
             resp2 = client.chat.completions.create(
-                model="gpt-4.5",
+                model="gpt-4.1",
                 messages=messages,
             )
             answer = resp2.choices[0].message.content or ""
