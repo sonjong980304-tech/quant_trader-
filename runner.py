@@ -520,7 +520,20 @@ def scan_growth_signals():
                     sig["current_price"] = float(real_price)
             except Exception as e:
                 logger.debug("KIS 현재가 조회 실패 [%s]: %s", ticker, e)
-        send_signal_alert(sig, growth_cash)
+
+        result = send_signal_alert(sig, growth_cash)
+
+        # 매수 성공 시 ML 포지션 저장 (익절/손절/7일 청산 추적용)
+        if result.get("status") == "ok" and result.get("qty", 0) > 0:
+            is_us = not (ticker.endswith(".KS") or ticker.endswith(".KQ"))
+            save_ml_position(
+                ticker       = ticker,
+                name         = sig.get("name", ticker),
+                qty          = result["qty"],
+                entry_price  = result["price"],
+                avg_win      = sig["avg_win"],
+                is_us        = is_us,
+            )
 
 
 # ─────────────────────────────────────────────
