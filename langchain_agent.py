@@ -344,7 +344,7 @@ def _eval_recall(context: str, answer: str) -> float:
         resp = client.chat.completions.create(
             model="gpt-5.4-mini",
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=10,
+            max_completion_tokens=10,
             temperature=0,
         )
         return round(min(max(float(resp.choices[0].message.content.strip()), 0.0), 1.0), 2)

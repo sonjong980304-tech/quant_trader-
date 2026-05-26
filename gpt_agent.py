@@ -520,7 +520,7 @@ Context Recall = (컨텍스트로 근거를 찾을 수 있는 답변 내 주장 
         resp = client.chat.completions.create(
             model="gpt-5.4-mini",
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=10,
+            max_completion_tokens=10,
             temperature=0,
         )
         raw = resp.choices[0].message.content.strip()
