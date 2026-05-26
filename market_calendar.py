@@ -1,7 +1,7 @@
 """
 market_calendar.py - KRX 영업일 체크 유틸리티
 
-pykrx.get_trading_dates()로 연간 영업일 목록을 캐시해
+pykrx.get_market_ohlcv_by_date()로 연간 영업일 목록을 캐시해
 주말 + 공휴일(빨간날) 모두 자동 필터링.
 """
 
@@ -29,8 +29,8 @@ def is_kr_trading_day(d: date = None) -> bool:
     if year != _CACHE_YEAR:
         try:
             from pykrx import stock as krx
-            dates = krx.get_trading_dates(f"{year}0101", f"{year}1231")
-            _CACHE = {dt.date() if hasattr(dt, "date") else dt for dt in dates}
+            df = krx.get_market_ohlcv_by_date(f"{year}0101", f"{year}1231", "005930")
+            _CACHE = {ts.date() for ts in df.index}
             _CACHE_YEAR = year
             logger.info("KRX 영업일 캐시 갱신: %d년 %d거래일", year, len(_CACHE))
         except Exception as e:
