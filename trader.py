@@ -232,6 +232,39 @@ class KISTrader:
                 })
         return holdings
 
+    def get_total_eval_amt(self) -> int:
+        """
+        계좌 총평가금액 조회 (예수금 + 보유주식 평가금액).
+        매도 후 미결제 대금도 포함되어 실제 운용 가능 자산에 더 가깝다.
+        """
+        url = f"{self.base_url}/uapi/domestic-stock/v1/trading/inquire-balance"
+        tr_id = "VTTC8434R" if IS_MOCK else "TTTC8434R"
+
+        params = {
+            "CANO":            self.cano,
+            "ACNT_PRDT_CD":    self.acnt_prdt,
+            "AFHR_FLPR_YN":    "N",
+            "OFL_YN":          "",
+            "INQR_DVSN":       "02",
+            "UNPR_DVSN":       "01",
+            "FUND_STTL_ICLD_YN": "N",
+            "FNCG_AMT_AUTO_RDPT_YN": "N",
+            "PRCS_DVSN":       "01",
+            "CTX_AREA_FK100":  "",
+            "CTX_AREA_NK100":  "",
+        }
+
+        resp = requests.get(url, headers=self._headers(tr_id), params=params, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+
+        if data.get("rt_cd") != "0":
+            raise ValueError(f"총평가금액 조회 실패: {data.get('msg1')}")
+
+        output2 = data.get("output2", [{}])
+        row = output2[0] if output2 else {}
+        return int(float(row.get("tot_evlu_amt", 0)))
+
     def get_available_cash(self) -> int:
         """주문 가능 현금 조회 (원)"""
         url = f"{self.base_url}/uapi/domestic-stock/v1/trading/inquire-psbl-order"

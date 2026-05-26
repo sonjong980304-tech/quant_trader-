@@ -116,11 +116,9 @@ logging.basicConfig(
 logger = logging.getLogger("runner")
 
 def _get_total_asset(trader: KISTrader) -> float:
+    """총평가금액(예수금+주식평가액) 조회. 매도 후 미결제 대금도 포함."""
     try:
-        cash      = trader.get_available_cash()
-        balance   = trader.get_balance()
-        stock_val = sum(b["qty"] * b["avg_price"] for b in balance)
-        return float(cash + stock_val)
+        return float(trader.get_total_eval_amt())
     except Exception as e:
         logger.warning("총 자산 조회 실패: %s", e)
         return 0.0
