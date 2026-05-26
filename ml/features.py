@@ -41,10 +41,12 @@ def add_features(
     df = df.copy()
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
+    # 중복 컬럼 제거 (yfinance MultiIndex 잔재)
+    df = df.loc[:, ~df.columns.duplicated()]
 
     # ── 기본 수익률 / 거래량 ──────────────────────────
-    df["change_rate"]    = df["Close"].pct_change()
-    df["volume_change"]  = df["Volume"].pct_change()
+    df["change_rate"]    = df["Close"].squeeze().pct_change()
+    df["volume_change"]  = df["Volume"].squeeze().pct_change()
 
     # ── RSI ──────────────────────────────────────────
     df["rsi"] = compute_rsi(df["Close"], period=rsi_period)
@@ -88,6 +90,9 @@ def add_features(
 
     # ── 변동성 ───────────────────────────────────────
     df["volatility_10d"] = df["change_rate"].rolling(10).std()
+
+    # inf 값은 dropna로 걸러지지 않으므로 NaN으로 치환
+    df.replace([np.inf, -np.inf], np.nan, inplace=True)
 
     return df
 
