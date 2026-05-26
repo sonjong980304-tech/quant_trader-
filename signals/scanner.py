@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 MIN_WIN_PROB    = 0.65   # 최소 승률 65%
 MIN_RISK_REWARD = 1.5    # 최소 기대값 손익비 (win_prob 가중 기대값 기준)
-MIN_TRIGGERS    = 2      # 기술적 트리거 최소 2개 이상
+MIN_TRIGGERS    = 1      # 기술적 트리거 최소 1개 이상
 MIN_MODEL_AUC   = 0.70   # 최소 모델 예측력 (0.5 = 동전던지기, 0.7+ = 쓸만한 예측)
 
 # 구조적 하락 종목 블랙리스트 — 신호 발생 시 무시
