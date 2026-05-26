@@ -13,7 +13,7 @@ import time
 import logging
 import logging.handlers
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 import pandas as pd
 import pytz
