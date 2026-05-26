@@ -120,3 +120,16 @@ def get_us_candidates(top_n: int = 50) -> dict[str, str]:
 
     logger.info("US 후보 종목: %d개 (S&P 500 필터)", len(candidates))
     return candidates
+
+
+def get_us_backtest_universe(top_n: int = 100) -> dict[str, str]:
+    """
+    백테스트용 US 유니버스 — S&P 500 전체 목록 (모멘텀 필터 없음).
+    장 외 시간에도 동작.
+    """
+    tickers = _get_sp500_tickers()
+    if not tickers:
+        return {}
+    result = {t: t for t in tickers[:top_n]}
+    logger.info("US 백테스트 유니버스: %d개", len(result))
+    return result

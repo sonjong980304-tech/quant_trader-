@@ -33,8 +33,9 @@ logger = logging.getLogger(__name__)
 
 HORIZON       = 7      # 청산 기간 (거래일)
 WIN_THRESHOLD = 0.03   # 성공 기준 (3%)
-MIN_WIN_PROB  = 0.55
+MIN_WIN_PROB  = 0.60   # 봇과 동일 기준
 MIN_RR        = 1.5
+MIN_AUC       = 0.58   # 봇과 동일 기준
 TEST_DAYS     = 45     # 백테스트 테스트 구간 (일)
 
 
@@ -97,6 +98,25 @@ def backtest_ticker(ticker: str, name: str) -> dict | None:
         logger.warning("  [%s] train 분량 부족", ticker)
         return None
 
+    # ── 트리거 사전 탐지 (학습 전 빠른 필터) ────────────────────
+    test_min   = df_min[df_min.index.date >= cutoff]
+    test_dates = sorted(set(test_min.index.date))
+
+    from signals.scanner import detect_triggers
+
+    has_trigger = False
+    for test_date in test_dates:
+        hist = df_daily[df_daily.index.date < test_date]
+        if len(hist) < 61:
+            continue
+        if detect_triggers(hist):
+            has_trigger = True
+            break
+
+    if not has_trigger:
+        return {"ticker": ticker, "name": name, "trades": 0}
+
+    # ── 트리거 있는 종목만 모델 학습 ────────────────────────────
     logger.info("  [%s] 모델 학습 중 (train: %d행)...", ticker, len(train_df))
     try:
         from ml.model import train
@@ -112,15 +132,14 @@ def backtest_ticker(ticker: str, name: str) -> dict | None:
     with open(model_path, "rb") as f:
         model = pickle.load(f)["model"]
 
+    model_auc = metrics.get("auc", 0.0)
+    if model_auc < MIN_AUC:
+        logger.info("  [%s] AUC %.3f < %.2f — 스킵", ticker, model_auc, MIN_AUC)
+        return {"ticker": ticker, "name": name, "trades": 0}
+
     avg_win  = metrics["avg_win"]
     avg_loss = metrics["avg_loss"]
-    rr       = avg_win / avg_loss if avg_loss > 0 else 0
 
-    # 테스트 구간 분봉
-    test_min   = df_min[df_min.index.date >= cutoff]
-    test_dates = sorted(set(test_min.index.date))
-
-    from signals.scanner import detect_triggers
     from ml.features import add_features, FEATURE_COLS
 
     trades = []
@@ -162,6 +181,11 @@ def backtest_ticker(ticker: str, name: str) -> dict | None:
                 wp = float(model.predict_proba(X)[0, 1])
             except Exception:
                 continue
+
+            # 기대값 기반 손익비 (봇과 동일)
+            expected_win  = avg_win  * wp
+            expected_loss = avg_loss * (1 - wp)
+            rr = expected_win / expected_loss if expected_loss > 0 else 0.0
 
             if wp < MIN_WIN_PROB or rr < MIN_RR:
                 continue
@@ -297,11 +321,9 @@ def run_backtest(stocks: dict | None = None) -> str:
 
 
 if __name__ == "__main__":
-    from config import US_STOCKS
-    try:
-        from signals.us_universe import get_us_candidates
-        us_stocks = get_us_candidates(top_n=50)
-    except Exception:
-        us_stocks = {}
-    stocks = us_stocks if us_stocks else US_STOCKS
+    from signals.krx_universe import get_krx_backtest_universe
+    from signals.us_universe import get_us_backtest_universe
+    krx = get_krx_backtest_universe(top_n=200)
+    us  = get_us_backtest_universe(top_n=100)
+    stocks = {**krx, **us}
     print(run_backtest(stocks))
