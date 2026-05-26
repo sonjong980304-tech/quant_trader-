@@ -94,6 +94,9 @@ def detect_triggers(df: pd.DataFrame) -> list[str]:
       ④ 이격도저점   : EMA20 대비 -5% 이하
       ⑤ BB스퀴즈돌파 : BB 폭 60일 최저 이후 상단 돌파
     """
+    if df.index.duplicated().any():
+        df = df[~df.index.duplicated(keep="last")].sort_index()
+
     if len(df) < 61:
         return []
 
@@ -149,6 +152,9 @@ def scan_ticker(ticker: str, df: pd.DataFrame) -> dict | None:
       ticker, name, triggers, win_prob, avg_win, avg_loss,
       risk_reward, current_price, kelly_fraction, kelly_amount
     """
+    if df.index.duplicated().any():
+        df = df[~df.index.duplicated(keep="last")].sort_index()
+
     triggers = detect_triggers(df)
     if not triggers:
         return None
