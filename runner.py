@@ -70,6 +70,29 @@ def _fetch_minute_yf(ticker: str):
         return None
 
 
+def _fetch_kr_realtime_bar(ticker: str):
+    """
+    KIS API로 한국 주식 당일 실시간 바 생성 (yfinance 실패 시 fallback).
+    반환: 단일 행 DataFrame (open/high/low/close/volume) 또는 None
+    """
+    if not KIS_APP_KEY:
+        return None
+    try:
+        code = ticker.replace(".KS", "").replace(".KQ", "")
+        info = KISTrader().get_current_price(code)
+        row = pd.DataFrame([{
+            "open":   info["open"]  or info["price"],
+            "high":   info["high"]  or info["price"],
+            "low":    info["low"]   or info["price"],
+            "close":  info["price"],
+            "volume": info["volume"],
+        }])
+        return row
+    except Exception as e:
+        logger.debug("KIS 실시간 바 조회 실패 [%s]: %s", ticker, e)
+        return None
+
+
 def _cached_fetch(ticker: str, period_years: int = 1) -> pd.DataFrame:
     now = time.time()
     if ticker in _OHLCV_CACHE:
@@ -507,6 +530,9 @@ def scan_growth_signals():
     def _fetch_with_today(ticker: str) -> pd.DataFrame:
         df = _cached_fetch(ticker)
         minute_df = _fetch_minute_yf(ticker)
+        # 한국 주식이고 yfinance 분봉 실패 시 KIS API 실시간 바로 대체
+        if minute_df is None and (ticker.endswith(".KS") or ticker.endswith(".KQ")):
+            minute_df = _fetch_kr_realtime_bar(ticker)
         return _append_today_bar(df, minute_df)
 
     signals = scan_all(stocks_to_scan, _fetch_with_today)
