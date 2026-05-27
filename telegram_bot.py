@@ -404,12 +404,16 @@ async def cmd_buy(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if len(args) < 2:
         await update.message.reply_text(
             "사용법: /buy <종목코드> <수량>\n"
-            "예) /buy 010140 10\n"
-            "(종목코드는 6자리 숫자, .KS/.KQ 제외)"
+            "예) /buy 005930 1  또는  /buy 005930.KS 1"
         )
         return
 
-    code = args[0].upper().replace(".KS", "").replace(".KQ", "")
+    raw  = args[0].upper()
+    code = raw.replace(".KS", "").replace(".KQ", "")
+    # 서픽스 보존 (.KS/.KQ 포함 시 CSV에 그대로 기록)
+    suffix = ".KS" if ".KS" in raw else (".KQ" if ".KQ" in raw else "")
+    ticker = code + suffix  # ex) "005930.KS" or "005930"
+
     try:
         qty = int(args[1])
         if qty <= 0:
@@ -418,7 +422,7 @@ async def cmd_buy(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ 수량은 1 이상의 정수여야 합니다.")
         return
 
-    await update.message.reply_text(f"⏳ {code} {qty}주 시장가 매수 주문 중...")
+    await update.message.reply_text(f"⏳ {ticker} {qty}주 시장가 매수 주문 중...")
 
     try:
         from trader import KISTrader
@@ -427,6 +431,7 @@ async def cmd_buy(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         # 현재가 조회
         price_info = t.get_current_price(code)
         price      = price_info["price"]
+        name       = price_info.get("name", ticker)
         total      = price * qty
 
         # 주문 가능 금액 확인
@@ -438,16 +443,26 @@ async def cmd_buy(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        result = t.buy(code, qty)
+        t.buy(code, qty)
+
+        # CSV 매수 기록
+        try:
+            from trade_logger import log_buy
+            log_buy(ticker, name, price, qty, strategy="수동")
+        except Exception as log_e:
+            logger.warning("[TradeLog] 수동 매수 기록 실패 [%s]: %s", ticker, log_e)
+
+        logger.info("수동 매수 완료: %s %d주 @ %d원", ticker, qty, price)
         await update.message.reply_text(
             f"✅ <b>매수 주문 완료</b>\n"
-            f"종목: {code}\n"
+            f"종목: {name} ({ticker})\n"
             f"수량: {qty}주\n"
             f"현재가: {price:,}원\n"
-            f"예상 금액: {total:,}원",
+            f"총 금액: {total:,}원",
             parse_mode="HTML"
         )
     except Exception as e:
+        logger.error("수동 매수 실패 [%s]: %s", ticker, e)
         await update.message.reply_text(f"⚠️ 매수 주문 실패: {e}")
 
 
