@@ -141,9 +141,14 @@ logging.basicConfig(
 logger = logging.getLogger("runner")
 
 def _get_total_asset(trader: KISTrader) -> float:
-    """총평가금액(예수금+주식평가액) 조회. 매도 후 미결제 대금도 포함."""
+    """총평가금액(예수금+주식평가액) 조회.
+    tot_evlu_amt가 0이면(미체결 등으로 주식 미보유) 예수금으로 폴백."""
     try:
-        return float(trader.get_total_eval_amt())
+        total = float(trader.get_total_eval_amt())
+        if total > 0:
+            return total
+        # tot_evlu_amt=0 → 보유 주식 없음, 예수금만으로 계산
+        return float(trader.get_available_cash())
     except Exception as e:
         logger.warning("총 자산 조회 실패: %s", e)
         return 0.0
@@ -462,6 +467,10 @@ def check_ml_positions():
 
         except Exception as e:
             logger.error("[%s] 자동 청산 실패: %s", ticker, e)
+            # 실제 보유 없음 → 포지션 동기화 (KIS "수량 초과" = 실제 미보유)
+            if "수량" in str(e) and "초과" in str(e):
+                logger.warning("[%s] 실제 미보유 확인 — state.json에서 제거", ticker)
+                to_remove.append(ticker)
 
     if to_remove:
         for t in to_remove:
