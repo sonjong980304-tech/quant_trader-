@@ -1,6 +1,18 @@
 {
-  "bot_active": false,
+  "bot_active": true,
   "legacy_tickers": [],
-  "activated_at": null,
-  "note": "legacy_tickers에 보유 중인 기존 2종목 코드가 자동 기록됩니다. 모두 매도 시 bot_active가 true로 전환됩니다."
+  "activated_at": "2026-05-25T20:45:39.809999+09:00",
+  "note": "legacy_tickers에 보유 중인 기존 2종목 코드가 자동 기록됩니다. 모두 매도 시 bot_active가 true로 전환됩니다.",
+  "ml_positions": {
+    "016360.KS": {
+      "ticker": "016360.KS",
+      "name": "삼성증권",
+      "qty": 1,
+      "entry_price": 127000.0,
+      "target_price": 136080.5,
+      "stop_price": 118110.0,
+      "entry_date": "2026-05-27",
+      "is_us": false
+    }
+  }
 }
