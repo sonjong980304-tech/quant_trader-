@@ -539,15 +539,34 @@ def _call_set_conditional_order(stock_name: str, condition_type: str,
                                 condition_value: float, action: str, quantity: int) -> str:
     try:
         from conditional_orders import add_order
-        # STOCKS에서 티커/코드 탐색
+        # 1) STOCKS에서 탐색
         ticker, stock_code = "", ""
         for t, name in STOCKS.items():
             if name == stock_name:
                 ticker = t
                 stock_code = t.replace(".KS", "").replace(".KQ", "")
                 break
+        # 2) STOCKS 미발견 시 pykrx로 KRX 전체에서 종목명→코드 탐색
         if not ticker:
-            return f"'{stock_name}' 종목을 STOCKS 목록에서 찾을 수 없습니다."
+            try:
+                from pykrx import stock as krx
+                from datetime import date
+                today = date.today().strftime("%Y%m%d")
+                for market in ("KOSPI", "KOSDAQ"):
+                    tickers = krx.get_market_ticker_list(today, market=market)
+                    for code in tickers:
+                        name = krx.get_market_ticker_name(code)
+                        if name == stock_name:
+                            suffix = ".KS" if market == "KOSPI" else ".KQ"
+                            ticker = code + suffix
+                            stock_code = code
+                            break
+                    if ticker:
+                        break
+            except Exception:
+                pass
+        if not ticker:
+            return f"'{stock_name}' 종목을 찾을 수 없습니다. 종목명이 정확한지 확인해 주세요."
 
         order = add_order(ticker, stock_name, stock_code,
                           condition_type, condition_value, action, quantity)
