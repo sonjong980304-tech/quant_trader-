@@ -125,7 +125,7 @@ def build_daily_summary_message(
 
     # 보유 현황
     if position:
-        avg_price  = position.get("avg_price", 0)
+        avg_price  = position.get("avg_price") or position.get("entry_price", 0)
         profit_pct = (close - avg_price) / avg_price * 100 if avg_price > 0 else 0
         p_icon     = "▲" if profit_pct >= 0 else "▼"
         hold_str   = f"보유중 | 매수가 {avg_price:,.0f}원 | 수익률 {p_icon}{abs(profit_pct):.1f}%"

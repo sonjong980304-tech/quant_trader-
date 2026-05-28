@@ -43,6 +43,9 @@ _CACHE_TTL   = 1800  # 초
 _MINUTE_CACHE: dict = {}
 _MINUTE_TTL   = 300  # 초
 
+# 당일 알림 전송 기록: {ticker: "YYYY-MM-DD"}
+_alerted_today: dict = {}
+
 
 def _fetch_minute_yf(ticker: str):
     """yfinance 5분봉 다운로드 (한국/미국 공통, ~15분 지연). 캐시 5분."""
@@ -218,6 +221,17 @@ def send_daily_summary():
         )
         return
 
+    # KIS 실시간 잔고에서 실제 평균단가 조회 (entry_price 보정용)
+    kis_avg: dict = {}
+    if KIS_APP_KEY:
+        try:
+            balance = KISTrader().get_balance()
+            for h in balance:
+                if h.get("avg_price") and h.get("qty", 0) > 0:
+                    kis_avg[h["stock_code"]] = float(h["avg_price"])
+        except Exception as e:
+            logger.warning("잔고 평균단가 조회 실패: %s", e)
+
     logger.info("일일 기술적 분석 리포트 전송 시작")
     send_telegram(
         f"📊 <b>일일 기술적 분석 리포트</b> (보유 {len(ml_positions)}종목)\n"
@@ -226,6 +240,10 @@ def send_daily_summary():
 
     for ticker, pos_info in ml_positions.items():
         stock_name = pos_info.get("name", ticker)
+        # KIS 실제 평균단가 우선 반영
+        code = ticker.replace(".KS", "").replace(".KQ", "")
+        if code in kis_avg:
+            pos_info = {**pos_info, "avg_price": kis_avg[code]}
         try:
             daily_df = fetch_ohlcv(ticker, period_years=1)
 
@@ -588,9 +606,16 @@ def scan_growth_signals():
         return
 
     logger.info("신호 발생: %d개 종목", len(signals))
+    today_str = datetime.now(KST).strftime("%Y-%m-%d")
     for sig in signals:
-        # 한국 주식은 KIS API 실시간 현재가로 교정 (yfinance 오류 방지)
         ticker = sig["ticker"]
+
+        # 당일 이미 알림을 보낸 종목은 스킵
+        if _alerted_today.get(ticker) == today_str:
+            logger.info("[%s] 당일 이미 알림 전송 — 스킵", ticker)
+            continue
+
+        # 한국 주식은 KIS API 실시간 현재가로 교정 (yfinance 오류 방지)
         if KIS_APP_KEY and (ticker.endswith(".KS") or ticker.endswith(".KQ")):
             try:
                 code = ticker.replace(".KS", "").replace(".KQ", "")
@@ -601,6 +626,7 @@ def scan_growth_signals():
                 logger.debug("KIS 현재가 조회 실패 [%s]: %s", ticker, e)
 
         result = send_signal_alert(sig, growth_cash)
+        _alerted_today[ticker] = today_str
 
         # 매수 성공 시 ML 포지션 저장 (익절/손절/7일 청산 추적용)
         if result.get("status") == "ok" and result.get("qty", 0) > 0:
