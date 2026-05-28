@@ -103,14 +103,19 @@ def retrain_daily(market: str = "all") -> dict:
         df = data.get(ticker)
         if df is None:
             return ticker, None
-        try:
-            _, metrics = train(df, ticker)
-            logger.info("  [OK] %s acc=%.3f auc=%.3f", ticker,
-                        metrics["accuracy"], metrics["auc"])
-            return ticker, metrics
-        except Exception as e:
-            logger.error("  [FAIL 학습] %s: %s", ticker, e)
-            return ticker, None
+        best_metrics = None
+        for agent in ("momentum", "reversion"):
+            try:
+                _, metrics = train(df, ticker, agent=agent)
+                logger.info("  [OK] %s [%s] acc=%.3f auc=%.3f",
+                            ticker, agent, metrics["accuracy"], metrics["auc"])
+                if best_metrics is None or metrics["auc"] > best_metrics["auc"]:
+                    best_metrics = metrics
+            except Exception as e:
+                logger.warning("  [SKIP] %s [%s]: %s", ticker, agent, e)
+        if best_metrics is None:
+            logger.error("  [FAIL] %s 두 에이전트 모두 학습 실패", ticker)
+        return ticker, best_metrics
 
     results = {}
     with ThreadPoolExecutor(max_workers=8) as pool:

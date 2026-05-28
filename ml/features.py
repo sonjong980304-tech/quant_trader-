@@ -28,6 +28,7 @@ def compute_rsi(close: pd.Series, period: int = 14) -> pd.Series:
     return 100 - (100 / (1 + rs))
 
 
+
 def add_features(
     df: pd.DataFrame,
     ema_period: int = 20,
@@ -115,6 +116,39 @@ FEATURE_COLS = [
     "ret_10d",
     "volatility_10d",
 ]
+
+
+def detect_momentum_rows(df: pd.DataFrame) -> pd.Series:
+    """돌파 에이전트 학습용: ① 거래량폭발 OR ⑤ BB스퀴즈돌파 조건이 발생한 행."""
+    if "volume_ratio" not in df.columns:
+        df = add_features(df)
+
+    # ① 거래량폭발: volume_ratio > 1.5 + 양봉 (학습용은 1.5로 완화 — 2.0은 데이터 부족)
+    vol_explode = (df["volume_ratio"] > 1.5) & (df["candle_body"] > 0)
+
+    # ⑤ BB스퀴즈돌파: 전일 BB폭이 60일 최저 근처 + 금일 종가가 BB상단 돌파
+    bb_upper = df["bb_mid_20"] + 2 * df["bb_std_20"]
+    min_w60  = df["bb_width_20"].rolling(60).min().shift(1)
+    bb_squeeze = (df["bb_width_20"].shift(1) <= min_w60 * 1.1) & (df["Close"] > bb_upper)
+
+    return (vol_explode | bb_squeeze).fillna(False)
+
+
+def detect_reversion_rows(df: pd.DataFrame) -> pd.Series:
+    """눌림목 에이전트 학습용: ② BB하단반등 OR ③ RSI과매도탈출 OR ④ 이격도저점 조건이 발생한 행."""
+    if "volume_ratio" not in df.columns:
+        df = add_features(df)
+
+    # ② BB하단반등: 전일 bb_pct < 0 → 금일 bb_pct ≥ 0
+    bb_bounce = (df["bb_pct_20"].shift(1) < 0) & (df["bb_pct_20"] >= 0)
+
+    # ③ RSI과매도탈출: 전일 rsi < 30 → 금일 rsi ≥ 30
+    rsi_escape = (df["rsi"].shift(1) < 30) & (df["rsi"] >= 30)
+
+    # ④ 이격도저점: ema_deviation_20 ≤ -5%
+    ema_low = df["ema_deviation_20"] <= -0.05
+
+    return (bb_bounce | rsi_escape | ema_low).fillna(False)
 
 
 def make_target(

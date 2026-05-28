@@ -71,14 +71,17 @@ def send_signal_alert(signal: dict, growth_cash: float) -> dict:
     급등 신호 자동 매수 실행 후 텔레그램 알림.
     반환: {"sent": bool, "qty": int, "price": float, "status": str}
     """
-    ticker   = signal["ticker"]
-    name     = signal.get("name", ticker)
-    win_prob = signal["win_prob"] * 100
-    avg_win  = signal["avg_win"]  * 100
-    avg_loss = signal["avg_loss"] * 100
-    rr       = signal["risk_reward"]
-    price    = signal["current_price"]
-    triggers = ", ".join(signal["triggers"])
+    ticker      = signal["ticker"]
+    name        = signal.get("name", ticker)
+    win_prob    = signal["win_prob"] * 100
+    avg_win     = signal["avg_win"]  * 100
+    avg_loss    = signal["avg_loss"] * 100
+    rr          = signal["risk_reward"]
+    price       = signal["current_price"]
+    triggers    = ", ".join(signal["triggers"])
+    agent_label = {"momentum": "돌파 에이전트", "reversion": "눌림목 에이전트"}.get(
+        signal.get("agent", ""), "통합 에이전트"
+    )
 
     kelly_f = kelly_fraction(signal["win_prob"], signal["avg_win"], signal["avg_loss"])
     qty, _, invest_amount = position_size(
@@ -103,6 +106,7 @@ def send_signal_alert(signal: dict, growth_cash: float) -> dict:
         msg = (
             f"🚨 <b>[급등 신호] {name} ({ticker})</b>\n"
             f"━━━━━━━━━━━━━━━\n"
+            f"🤖 에이전트: <b>{agent_label}</b>\n"
             f"📡 트리거: {triggers}\n"
             f"💵 현재가: {price:,.0f}원\n\n"
             f"📊 <b>ML 예측 (7일 기준)</b>\n"
