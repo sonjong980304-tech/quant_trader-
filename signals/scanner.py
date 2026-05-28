@@ -23,6 +23,10 @@ MIN_RISK_REWARD = 1.5    # 최소 기대값 손익비 (win_prob 가중 기대값
 MIN_TRIGGERS    = 1      # 기술적 트리거 최소 1개 이상
 MIN_MODEL_AUC   = 0.58   # 최소 모델 예측력 (0.5 = 동전던지기, 0.58+ = 참고 가능)
 
+# 트리거 → 에이전트 매핑
+_MOMENTUM_TRIGGERS  = {"거래량폭발", "BB스퀴즈돌파"}
+_REVERSION_TRIGGERS = {"BB하단반등", "RSI과매도탈출", "이격도저점"}
+
 # 구조적 하락 종목 블랙리스트 — 신호 발생 시 무시
 BLACKLIST: set[str] = {"EL"}
 
@@ -147,14 +151,43 @@ def detect_triggers(df: pd.DataFrame) -> list[str]:
 # 단일 종목 스캔
 # ─────────────────────────────────────────────
 
+def _eval_agent(df: pd.DataFrame, ticker: str, agent: str) -> dict | None:
+    """단일 에이전트 예측. 조건 미충족 시 None."""
+    from ml.model import predict
+    pred = predict(df, ticker, agent=agent)
+    if not pred["has_model"]:
+        logger.debug("  [%s][%s] 모델 없음 — 패스", ticker, agent)
+        return None
+    win_prob = pred.get("win_prob")
+    avg_win  = pred.get("avg_win")
+    avg_loss = pred.get("avg_loss")
+    if win_prob is None or avg_win is None or avg_loss is None or avg_loss <= 0:
+        return None
+    model_auc = pred.get("model_auc", 0.0) or 0.0
+    if model_auc < MIN_MODEL_AUC:
+        logger.debug("  [%s][%s] AUC %.3f < %.2f — 패스", ticker, agent, model_auc, MIN_MODEL_AUC)
+        return None
+    if win_prob < MIN_WIN_PROB:
+        logger.debug("  [%s][%s] 승률 %.1f%% < %.0f%% — 패스",
+                     ticker, agent, win_prob * 100, MIN_WIN_PROB * 100)
+        return None
+    expected_win  = avg_win  * win_prob
+    expected_loss = avg_loss * (1 - win_prob)
+    rr = expected_win / expected_loss if expected_loss > 0 else 0.0
+    if rr < MIN_RISK_REWARD:
+        logger.debug("  [%s][%s] 손익비 %.2f < %.1f — 패스", ticker, agent, rr, MIN_RISK_REWARD)
+        return None
+    return {**pred, "risk_reward": round(rr, 2), "agent": agent}
+
+
 def scan_ticker(ticker: str, df: pd.DataFrame) -> dict | None:
     """
-    단일 종목에 대해 트리거 → ML 예측 → 신호 판단.
+    단일 종목에 대해 트리거 → 에이전트 분기 → 최종 에이전트 결합 → 신호 판단.
 
-    반환: 신호 dict (조건 미충족 시 None)
-    신호 dict 키:
-      ticker, name, triggers, win_prob, avg_win, avg_loss,
-      risk_reward, current_price, kelly_fraction, kelly_amount
+    에이전트 구조:
+      돌파 에이전트   (momentum) : 거래량폭발, BB스퀴즈돌파 트리거 발생 시
+      눌림목 에이전트 (reversion): BB하단반등, RSI과매도탈출, 이격도저점 트리거 발생 시
+      최종 에이전트              : 두 에이전트 중 win_prob이 높은 쪽 선택
     """
     if df.index.duplicated().any():
         df = df[~df.index.duplicated(keep="last")].sort_index()
@@ -164,61 +197,49 @@ def scan_ticker(ticker: str, df: pd.DataFrame) -> dict | None:
         return None
 
     if len(triggers) < MIN_TRIGGERS:
-        logger.debug("  [%s] 트리거 %d개 < %d개 — 패스 (%s)",
-                     ticker, len(triggers), MIN_TRIGGERS, triggers)
         return None
 
     logger.info("  [%s] 트리거 감지: %s — ML 예측 실행", ticker, triggers)
 
-    from ml.model import predict
-    pred = predict(df, ticker)
+    trigger_set   = set(triggers)
+    has_momentum  = bool(trigger_set & _MOMENTUM_TRIGGERS)
+    has_reversion = bool(trigger_set & _REVERSION_TRIGGERS)
 
-    if not pred["has_model"]:
-        logger.debug("  [%s] 모델 없음 — 패스", ticker)
+    # ── 에이전트별 예측 ──────────────────────────────────────
+    candidates = []
+    if has_momentum:
+        result = _eval_agent(df, ticker, "momentum")
+        if result:
+            candidates.append(result)
+    if has_reversion:
+        result = _eval_agent(df, ticker, "reversion")
+        if result:
+            candidates.append(result)
+
+    # ── 최종 에이전트: win_prob 최고 선택 ────────────────────
+    if not candidates:
+        logger.debug("  [%s] 에이전트 조건 미충족 — 패스", ticker)
         return None
 
-    win_prob = pred.get("win_prob")
-    avg_win  = pred.get("avg_win")
-    avg_loss = pred.get("avg_loss")
+    best = max(candidates, key=lambda x: x["win_prob"])
+    win_prob = best["win_prob"]
+    avg_win  = best["avg_win"]
+    avg_loss = best["avg_loss"]
 
-    if win_prob is None or avg_win is None or avg_loss is None or avg_loss <= 0:
-        return None
-
-    model_auc = pred.get("model_auc", 0.0) or 0.0
-    if model_auc < MIN_MODEL_AUC:
-        logger.debug("  [%s] 모델 AUC %.3f < %.2f — 패스 (예측력 부족)",
-                     ticker, model_auc, MIN_MODEL_AUC)
-        return None
-
-    if win_prob < MIN_WIN_PROB:
-        logger.debug("  [%s] 승률 %.1f%% < %.0f%% — 패스",
-                     ticker, win_prob * 100, MIN_WIN_PROB * 100)
-        return None
-
-    # 기대값 기반 손익비: (평균수익 × 승률) / (평균손실 × 패률)
-    # 기존 avg_win/avg_loss 단순 비율보다 win_prob이 낮을수록 엄격해짐
-    expected_win  = avg_win  * win_prob
-    expected_loss = avg_loss * (1 - win_prob)
-    risk_reward   = expected_win / expected_loss if expected_loss > 0 else 0.0
-
-    if risk_reward < MIN_RISK_REWARD:
-        logger.debug("  [%s] 기대값 손익비 %.2f < %.1f — 패스",
-                     ticker, risk_reward, MIN_RISK_REWARD)
-        return None
-
-    logger.info("  [%s] 🚨 신호 확정! 승률=%.1f%% 손익비=%.2f",
-                ticker, win_prob * 100, risk_reward)
+    logger.info("  [%s] 🚨 신호 확정! 에이전트=%s 승률=%.1f%% 손익비=%.2f",
+                ticker, best["agent"], win_prob * 100, best["risk_reward"])
 
     return {
         "ticker":        ticker,
         "triggers":      triggers,
+        "agent":         best["agent"],
         "win_prob":      win_prob,
         "avg_win":       avg_win,
         "avg_loss":      avg_loss,
-        "risk_reward":   round(risk_reward, 2),
+        "risk_reward":   best["risk_reward"],
         "current_price": float(df["Close"].iloc[-1]),
-        "model_acc":     pred.get("model_acc"),
-        "model_auc":     pred.get("model_auc"),
+        "model_acc":     best.get("model_acc"),
+        "model_auc":     best.get("model_auc"),
     }
 
 

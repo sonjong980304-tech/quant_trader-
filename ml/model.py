@@ -28,16 +28,18 @@ THRESHOLD  = 0.03   # 성공 기준 수익률 (3%)
 N_SPLITS   = 5      # TimeSeriesSplit fold 수
 
 
-def _model_path(ticker: str) -> str:
-    return os.path.join(MODEL_DIR, f"{ticker.replace('.', '_')}.pkl")
+def _model_path(ticker: str, agent: str = "") -> str:
+    suffix = f"_{agent}" if agent else ""
+    return os.path.join(MODEL_DIR, f"{ticker.replace('.', '_')}{suffix}.pkl")
 
 
-def train(df: pd.DataFrame, ticker: str) -> tuple[object, dict]:
+def train(df: pd.DataFrame, ticker: str, agent: str = "") -> tuple[object, dict]:
     """
     XGBoost 모델 학습 후 pkl 저장.
 
-    df     : 10년치 OHLCV 데이터프레임
+    df     : 5~10년치 OHLCV 데이터프레임
     ticker : 종목 티커 (파일명 키)
+    agent  : "" (전체) | "momentum" (돌파) | "reversion" (눌림목)
 
     반환: (model, metrics)
     metrics 키: accuracy, auc, avg_win, avg_loss, n_samples, positive_rate
@@ -51,17 +53,30 @@ def train(df: pd.DataFrame, ticker: str) -> tuple[object, dict]:
     labels, future_returns = make_target(df, horizon=HORIZON, threshold=THRESHOLD)
 
     df = df.copy()
-    df["_label"]        = labels
+    df["_label"]         = labels
     df["_future_return"] = future_returns
     df = df.dropna(subset=FEATURE_COLS + ["_label", "_future_return"])
     df = df.iloc[:-HORIZON]   # 미래 데이터 없는 마지막 N행 제거
+
+    # 에이전트별 트리거 조건 필터링
+    if agent == "momentum":
+        from ml.features import detect_momentum_rows
+        mask = detect_momentum_rows(df).reindex(df.index).fillna(False)
+        df = df[mask]
+        logger.info("  [%s] momentum 필터 후 %d행", ticker, len(df))
+    elif agent == "reversion":
+        from ml.features import detect_reversion_rows
+        mask = detect_reversion_rows(df).reindex(df.index).fillna(False)
+        df = df[mask]
+        logger.info("  [%s] reversion 필터 후 %d행", ticker, len(df))
 
     X            = df[FEATURE_COLS].values.astype(np.float32)
     y            = df["_label"].values.astype(int)
     future_ret   = df["_future_return"].values
 
-    if len(X) < 100:
-        raise ValueError(f"학습 데이터 부족: {len(X)}행 (최소 100행 필요)")
+    min_samples = 50 if agent else 100
+    if len(X) < min_samples:
+        raise ValueError(f"학습 데이터 부족: {len(X)}행 (최소 {min_samples}행 필요)")
 
     tscv         = TimeSeriesSplit(n_splits=N_SPLITS)
     oof_preds    = np.zeros(len(X), dtype=int)
@@ -115,9 +130,10 @@ def train(df: pd.DataFrame, ticker: str) -> tuple[object, dict]:
 
     # Platt Scaling 캘리브레이션 — 마지막 fold 검증 데이터 사용 (시계열 순서 보존)
     from sklearn.calibration import CalibratedClassifierCV
+    from sklearn.frozen import FrozenEstimator
     if last_val_idx is not None and len(last_val_idx) >= 20:
         calibrated_model = CalibratedClassifierCV(
-            final_model, method="sigmoid", cv="prefit"
+            FrozenEstimator(final_model), method="sigmoid"
         )
         calibrated_model.fit(X[last_val_idx], y[last_val_idx])
     else:
@@ -147,18 +163,19 @@ def train(df: pd.DataFrame, ticker: str) -> tuple[object, dict]:
         "horizon":       HORIZON,
     }
 
-    path = _model_path(ticker)
+    path = _model_path(ticker, agent)
     with open(path, "wb") as f:
         pickle.dump({"model": calibrated_model, "metrics": metrics}, f)
 
-    logger.info("[%s] 모델 저장 완료 | acc=%.3f auc=%.3f avg_win=%.1f%% avg_loss=%.1f%%",
-                ticker, acc, auc, avg_win * 100, avg_loss * 100)
+    agent_label = f"[{agent}] " if agent else ""
+    logger.info("[%s] %s모델 저장 완료 | acc=%.3f auc=%.3f avg_win=%.1f%% avg_loss=%.1f%%",
+                ticker, agent_label, acc, auc, avg_win * 100, avg_loss * 100)
     return final_model, metrics
 
 
-def load_model(ticker: str) -> tuple[object | None, dict | None]:
+def load_model(ticker: str, agent: str = "") -> tuple[object | None, dict | None]:
     """저장된 모델 로드. 없으면 (None, None) 반환."""
-    path = _model_path(ticker)
+    path = _model_path(ticker, agent)
     if not os.path.exists(path):
         return None, None
     with open(path, "rb") as f:
@@ -166,9 +183,11 @@ def load_model(ticker: str) -> tuple[object | None, dict | None]:
     return data["model"], data["metrics"]
 
 
-def predict(df: pd.DataFrame, ticker: str) -> dict:
+def predict(df: pd.DataFrame, ticker: str, agent: str = "") -> dict:
     """
     최신 바의 피처로 7일 승률 예측.
+
+    agent  : "" (기존 통합 모델) | "momentum" | "reversion"
 
     반환:
       has_model   : 모델 존재 여부
@@ -178,7 +197,7 @@ def predict(df: pd.DataFrame, ticker: str) -> dict:
       model_acc   : OOF 정확도
       model_auc   : OOF AUC
     """
-    model, metrics = load_model(ticker)
+    model, metrics = load_model(ticker, agent)
     if model is None:
         return {"has_model": False, "win_prob": None,
                 "avg_win": None, "avg_loss": None}
