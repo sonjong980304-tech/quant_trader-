@@ -155,14 +155,16 @@ def set_conditional_order(
     condition_value: float,
     action: str,
     quantity: int,
+    stock_code: str = "",
 ) -> str:
     """
     조건부 주문을 등록합니다.
     condition_type: 'price_below' | 'price_above' | 'profit_above' | 'profit_below'
     action: 'buy' | 'sell' | 'sellall'
+    stock_code: 6자리 종목코드 (알면 반드시 입력 — 삼성전자=005930, SK하이닉스=000660, NAVER=035420)
     """
     from gpt_agent import _call_set_conditional_order
-    return _call_set_conditional_order(stock_name, condition_type, condition_value, action, quantity)
+    return _call_set_conditional_order(stock_name, condition_type, condition_value, action, quantity, stock_code)
 
 
 @tool

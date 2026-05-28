@@ -68,6 +68,10 @@ _TOOLS = [
                 "type": "object",
                 "properties": {
                     "stock_name": {"type": "string", "description": "종목명 (예: '삼성전자')"},
+                    "stock_code": {
+                        "type": "string",
+                        "description": "6자리 종목코드 (선택). 알고 있으면 반드시 입력 — 삼성전자=005930, SK하이닉스=000660, NAVER=035420 등. 코드가 있으면 탐색 없이 바로 등록됩니다.",
+                    },
                     "condition_type": {
                         "type": "string",
                         "enum": ["price_below", "price_above", "profit_above", "profit_below"],
@@ -421,6 +425,7 @@ def ask(user_id: int, question: str) -> str:
                         float(args.get("condition_value", 0)),
                         args.get("action", ""),
                         int(args.get("quantity", 0)),
+                        args.get("stock_code", ""),
                     )
                     logger.info("[GPT] 조건부 주문 등록: %s", args)
                 elif tc.function.name == "list_conditional_orders":
@@ -536,27 +541,60 @@ def clear_history(user_id: int) -> None:
 
 
 def _call_set_conditional_order(stock_name: str, condition_type: str,
-                                condition_value: float, action: str, quantity: int) -> str:
+                                condition_value: float, action: str, quantity: int,
+                                stock_code: str = "") -> str:
     try:
         from conditional_orders import add_order
-        # 1) STOCKS에서 탐색
-        ticker, stock_code = "", ""
-        for t, name in STOCKS.items():
-            if name == stock_name:
-                ticker = t
-                stock_code = t.replace(".KS", "").replace(".KQ", "")
-                break
-        # 2) STOCKS 미발견 시 pykrx로 KRX 전체에서 종목명→코드 탐색
+        ticker = ""
+
+        # 1) stock_code가 직접 제공된 경우 → 탐색 없이 바로 구성
+        if stock_code:
+            stock_code = stock_code.strip().replace(".KS", "").replace(".KQ", "")
+            # pykrx로 종목명 확인 (코드→이름은 날짜 무관하게 동작)
+            if not stock_name:
+                try:
+                    from pykrx import stock as krx
+                    stock_name = krx.get_market_ticker_name(stock_code) or stock_name
+                except Exception:
+                    pass
+            # KOSPI 우선, KOSDAQ 구분은 종목명으로 역추적 불필요 — .KS 시도
+            suffix = ".KQ" if stock_code.startswith(("0", "1", "2", "3", "4", "5", "6", "7", "8", "9")) else ".KS"
+            # STOCKS에서 suffix 확인
+            for t in STOCKS:
+                if t.replace(".KS", "").replace(".KQ", "") == stock_code:
+                    suffix = ".KS" if t.endswith(".KS") else ".KQ"
+                    break
+            else:
+                # pykrx로 시장 구분
+                try:
+                    from pykrx import stock as krx
+                    from datetime import date, timedelta
+                    check_date = (date.today() - timedelta(days=1)).strftime("%Y%m%d")
+                    kosdaq = krx.get_market_ticker_list(check_date, market="KOSDAQ")
+                    suffix = ".KQ" if stock_code in kosdaq else ".KS"
+                except Exception:
+                    suffix = ".KS"
+            ticker = stock_code + suffix
+
+        # 2) STOCKS에서 종목명으로 탐색
+        if not ticker:
+            for t, name in STOCKS.items():
+                if name == stock_name:
+                    ticker = t
+                    stock_code = t.replace(".KS", "").replace(".KQ", "")
+                    break
+
+        # 3) pykrx로 전날 날짜 기준 탐색 (오늘 장중엔 0 반환되므로 전날 사용)
         if not ticker:
             try:
                 from pykrx import stock as krx
-                from datetime import date
-                today = date.today().strftime("%Y%m%d")
+                from datetime import date, timedelta
+                check_date = (date.today() - timedelta(days=1)).strftime("%Y%m%d")
                 for market in ("KOSPI", "KOSDAQ"):
-                    tickers = krx.get_market_ticker_list(today, market=market)
+                    tickers = krx.get_market_ticker_list(check_date, market=market)
                     for code in tickers:
-                        name = krx.get_market_ticker_name(code)
-                        if name == stock_name:
+                        nm = krx.get_market_ticker_name(code)
+                        if nm == stock_name:
                             suffix = ".KS" if market == "KOSPI" else ".KQ"
                             ticker = code + suffix
                             stock_code = code
@@ -565,8 +603,12 @@ def _call_set_conditional_order(stock_name: str, condition_type: str,
                         break
             except Exception:
                 pass
+
         if not ticker:
-            return f"'{stock_name}' 종목을 찾을 수 없습니다. 종목명이 정확한지 확인해 주세요."
+            return (
+                f"'{stock_name}' 종목을 찾을 수 없습니다.\n"
+                f"종목코드(6자리)를 함께 알려주시면 바로 등록됩니다. (예: '삼성전자 005930 30만원 이하 1주 매수')"
+            )
 
         order = add_order(ticker, stock_name, stock_code,
                           condition_type, condition_value, action, quantity)

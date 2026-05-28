@@ -73,53 +73,60 @@ def get_us_candidates(top_n: int = 50) -> dict[str, str]:
     if not tickers:
         return {}
 
-    logger.info("S&P 500 %d종목 22일 배치 다운로드 중...", len(tickers))
-    try:
-        # yfinance 1.x: group_by/threads 제거 → 기본 MultiIndex(field, ticker) 반환
-        raw = yf.download(
-            tickers,
-            period="22d",
-            auto_adjust=True,
-            progress=False,
-        )
-    except Exception as e:
-        logger.warning("yfinance 배치 다운로드 실패: %s", e)
-        return {}
-
-    # 단일 티커면 MultiIndex 아닐 수 있음
-    is_multi = isinstance(raw.columns, pd.MultiIndex)
-    available = set(raw.columns.get_level_values(1)) if is_multi else set()
-
+    # 100종목씩 분할 다운로드 — 배치가 클수록 SQLite 캐시 충돌·NoneType 에러 증가
+    BATCH_SIZE = 100
     vol_ratios: dict[str, float] = {}
 
-    for ticker in tickers:
+    for batch_start in range(0, len(tickers), BATCH_SIZE):
+        batch = tickers[batch_start:batch_start + BATCH_SIZE]
         try:
-            if is_multi:
-                if ticker not in available:
-                    continue
-                df = raw.xs(ticker, axis=1, level=1).copy()
-            else:
-                df = raw.copy()
-            df = df[["Close", "Volume"]].dropna()
-            if len(df) < 3:
-                continue
-
-            today_ret = (df["Close"].iloc[-1] - df["Close"].iloc[-2]) / df["Close"].iloc[-2]
-            if today_ret <= 0:
-                continue
-
-            vol_ma = df["Volume"].iloc[:-1].mean()
-            if vol_ma <= 0:
-                continue
-
-            proj_vol  = _project_us_volume(float(df["Volume"].iloc[-1]))
-            vol_ratio = proj_vol / vol_ma
-            if vol_ratio < 1.5:
-                continue
-
-            vol_ratios[ticker] = vol_ratio
-        except Exception:
+            raw = yf.download(
+                batch,
+                period="22d",
+                auto_adjust=True,
+                progress=False,
+            )
+        except Exception as e:
+            logger.warning("yfinance 배치 다운로드 실패 (%d~%d): %s",
+                           batch_start, batch_start + len(batch), e)
             continue
+
+        if raw is None or raw.empty:
+            continue
+
+        is_multi = isinstance(raw.columns, pd.MultiIndex)
+        available = set(raw.columns.get_level_values(1)) if is_multi else set()
+
+        for ticker in batch:
+            try:
+                if is_multi:
+                    if ticker not in available:
+                        continue
+                    df = raw.xs(ticker, axis=1, level=1).copy()
+                else:
+                    df = raw.copy()
+                df = df[["Close", "Volume"]].dropna()
+                if len(df) < 3:
+                    continue
+
+                today_ret = (df["Close"].iloc[-1] - df["Close"].iloc[-2]) / df["Close"].iloc[-2]
+                if today_ret <= 0:
+                    continue
+
+                vol_ma = df["Volume"].iloc[:-1].mean()
+                if vol_ma <= 0:
+                    continue
+
+                proj_vol  = _project_us_volume(float(df["Volume"].iloc[-1]))
+                vol_ratio = proj_vol / vol_ma
+                if vol_ratio < 1.5:
+                    continue
+
+                vol_ratios[ticker] = vol_ratio
+            except Exception:
+                continue
+
+    logger.info("S&P 500 %d종목 스크리닝 완료", len(tickers))
 
     top = sorted(vol_ratios, key=lambda t: vol_ratios[t], reverse=True)[:top_n]
     candidates = {t: t for t in top}
