@@ -209,7 +209,8 @@ def list_trade_records(status: str = "all") -> str:
 def edit_trade_record(trade_id: str, field: str, value: str) -> str:
     """
     매매 이력 CSV의 특정 항목을 수정합니다.
-    trade_id: 수정할 거래 ID (list_trade_records로 확인)
+    trade_id: 수정할 거래 ID(8자리) 또는 종목코드(예: 005930.KS) 또는 종목명(예: 삼성전자).
+              종목코드/종목명을 주면 가장 최근 거래를 자동 선택합니다.
     field: 수정할 컬럼명 (entry_price, exit_price, qty, entry_date, exit_date, strategy, notes, win_prob, name 등)
     value: 새로운 값
     수정 불가 컬럼: trade_id, ticker, side
@@ -219,9 +220,23 @@ def edit_trade_record(trade_id: str, field: str, value: str) -> str:
     if field in IMMUTABLE:
         return f"⚠️ '{field}'는 수정 불가 컬럼입니다."
     rows = _read_all()
+    # 8자리 ID 직접 매칭
     target = next((r for r in rows if r["trade_id"] == trade_id), None)
+    # ID 미발견 시 → 종목코드 또는 종목명으로 검색 (가장 최근 거래)
     if not target:
-        return f"⚠️ trade_id '{trade_id}'를 찾을 수 없습니다."
+        key = trade_id.strip()
+        candidates = [
+            r for r in rows
+            if r.get("ticker", "").upper() == key.upper()
+            or r.get("name", "") == key
+        ]
+        if not candidates:
+            sample = "\n".join(
+                f"  [{r['trade_id']}] {r['entry_date']} {r['ticker']} {r['name']}"
+                for r in rows[-5:]
+            )
+            return f"⚠️ '{trade_id}'를 찾을 수 없습니다. 최근 거래:\n{sample}"
+        target = sorted(candidates, key=lambda r: r.get("entry_date", ""))[-1]
     old_val = target.get(field, "")
     target[field] = value
     # pnl 재계산 (entry_price 또는 exit_price 변경 시)
@@ -283,6 +298,7 @@ def _build_system_prompt() -> str:
   계좌 잔고·보유 종목 → get_account_balance 호출
   매매 이력 조회 → list_trade_records 호출
   매매 이력 수정 (진입가/청산가/수량/메모 등 변경 요청 시) → edit_trade_record 호출
+    ※ trade_id를 모를 경우 종목명(예: "삼성전자")이나 종목코드(예: "005930.KS")를 trade_id에 전달하면 자동 검색
   ※ 학습 데이터(training knowledge)로 주가·재무 수치를 절대 답변하지 마세요.
      반드시 툴을 호출해 실시간 데이터를 가져오세요.
 
