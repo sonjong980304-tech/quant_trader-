@@ -313,32 +313,34 @@ class KISTrader:
 
     def get_us_current_price(self, symbol: str) -> dict:
         """
-        미국 주식 현재가 조회.
+        미국 주식 현재가 조회. NASD → NYSE → AMEX 순서로 거래소 자동 감지.
         symbol: Yahoo Finance 심볼 (예: 'QQQ', 'TLT', 'AAPL')
-        반환: {"symbol": str, "price": float, "currency": "USD"}
+        반환: {"symbol": str, "price": float, "currency": "USD", "_excg_cd": str}
         """
-        _, excd = self._us_exchange(symbol)
+        sym = symbol.upper()
         url = f"{self.base_url}/uapi/overseas-price/v1/quotations/price"
-        params = {
-            "AUTH": "",
-            "EXCD": excd,
-            "SYMB": symbol.upper(),
-        }
-
-        resp = requests.get(url, headers=self._headers("HHDFS00000300"), params=params, timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
-
-        if data.get("rt_cd") != "0":
-            raise ValueError(f"미국주식 현재가 조회 실패 [{symbol}]: {data.get('msg1')}")
-
-        output = data["output"]
-        return {
-            "symbol":      symbol.upper(),
-            "price":       float(output.get("last", output.get("stck_prpr", 0))),
-            "change_rate": float(output.get("diff", 0)),
-            "currency":    "USD",
-        }
+        last_err = None
+        for excd, excg_cd in [("NAS", "NASD"), ("NYS", "NYSE"), ("AMS", "AMEX")]:
+            params = {"AUTH": "", "EXCD": excd, "SYMB": sym}
+            try:
+                resp = requests.get(url, headers=self._headers("HHDFS00000300"), params=params, timeout=10)
+                resp.raise_for_status()
+                data = resp.json()
+                if data.get("rt_cd") == "0":
+                    output = data["output"]
+                    price = float(output.get("last", output.get("stck_prpr", 0)))
+                    if price > 0:
+                        return {
+                            "symbol":      sym,
+                            "price":       price,
+                            "change_rate": float(output.get("diff", 0)),
+                            "currency":    "USD",
+                            "_excg_cd":    excg_cd,
+                        }
+                last_err = data.get("msg1", "가격 0")
+            except Exception as e:
+                last_err = str(e)
+        raise ValueError(f"미국주식 현재가 조회 실패 [{symbol}]: {last_err}")
 
     def _place_us_order(self, symbol: str, qty: int, order_type: str) -> dict:
         """
@@ -352,11 +354,10 @@ class KISTrader:
         else:
             tr_id = "TTTT1002U" if order_type == "BUY" else "TTTT1006U"
 
-        ovrs_excg_cd, _ = self._us_exchange(symbol)
-
-        # 현재가로 지정가 주문 (시장가 효과)
-        price_info = self.get_us_current_price(symbol)
-        limit_price = str(round(price_info["price"], 2))
+        # 현재가 조회로 거래소도 자동 감지
+        price_info   = self.get_us_current_price(symbol)
+        ovrs_excg_cd = price_info.get("_excg_cd", "NASD")
+        limit_price  = str(round(price_info["price"], 2))
 
         url  = f"{self.base_url}/uapi/overseas-stock/v1/trading/order"
         body = {

@@ -645,6 +645,66 @@ def scan_growth_signals():
 # 월간 리밸런싱
 # ─────────────────────────────────────────────
 
+def execute_pending_orders(market: str):
+    """장 시작 시 예약 주문 실행. market: 'KR' | 'US'"""
+    from pending_orders import pop_pending_orders
+    from notifier import send_telegram
+
+    orders = pop_pending_orders(market)
+    if not orders:
+        return
+
+    logger.info("[예약주문] %s 장 시작 — %d건 실행", market, len(orders))
+    results = []
+    for o in orders:
+        ticker  = o["ticker"]
+        code    = o["code"]
+        qty     = o["qty"]
+        action  = o["action"]
+        is_us   = o["is_us"]
+        try:
+            from trader import KISTrader
+            t = KISTrader()
+            if is_us:
+                price_info = t.get_us_current_price(code)
+                price = price_info["price"]
+                if action == "BUY":
+                    t.buy_us(code, qty)
+                    from trade_logger import log_buy
+                    log_buy(ticker, code, price, qty, strategy="예약매수")
+                else:
+                    t.sell_us(code, qty)
+                    from trade_logger import log_sell
+                    log_sell(ticker, price, qty=qty, notes="예약매도")
+                price_str = f"${price:,.2f}"
+            else:
+                price_info = t.get_current_price(code)
+                price = price_info["price"]
+                name  = price_info.get("name", ticker)
+                if action == "BUY":
+                    t.buy(code, qty)
+                    from trade_logger import log_buy
+                    log_buy(ticker, name, price, qty, strategy="예약매수")
+                else:
+                    t.sell(code, qty)
+                    from trade_logger import log_sell
+                    log_sell(ticker, price, qty=qty, notes="예약매도")
+                price_str = f"{price:,}원"
+            icon = "✅"
+            msg_detail = f"{price_str} × {qty}주"
+            logger.info("[예약주문] 완료 %s %s %s", action, ticker, msg_detail)
+        except Exception as e:
+            icon = "❌"
+            msg_detail = str(e)
+            logger.error("[예약주문] 실패 %s %s: %s", action, ticker, e)
+        results.append(f"{icon} {action} {ticker} {qty}주 — {msg_detail}")
+
+    send_telegram(
+        f"📋 <b>예약 주문 실행 결과 ({market}장)</b>\n" +
+        "\n".join(results)
+    )
+
+
 def retrain_kr_models():
     """매일 07:30 실행 — KRX 유니버스 ML 모델 재학습."""
     now = datetime.now(KST)
@@ -748,9 +808,12 @@ def main():
     # 고정 스케줄
     schedule.every().day.at("07:30").do(retrain_kr_models)
     schedule.every().day.at("08:00").do(send_morning_briefing)
+    schedule.every().day.at("09:00").do(lambda: execute_pending_orders("KR"))  # 한국장 시작
     schedule.every().day.at("15:00").do(send_daily_summary)
-    schedule.every().day.at("22:30").do(retrain_us_models)  # 서머타임 미국장 시작
-    schedule.every().day.at("23:30").do(retrain_us_models)  # 동절기 미국장 시작
+    schedule.every().day.at("22:30").do(retrain_us_models)   # 서머타임 미국장 시작
+    schedule.every().day.at("22:30").do(lambda: execute_pending_orders("US"))  # 서머타임 US 예약 주문
+    schedule.every().day.at("23:30").do(retrain_us_models)   # 동절기 미국장 시작
+    schedule.every().day.at("23:30").do(lambda: execute_pending_orders("US"))  # 동절기 US 예약 주문
 
     # ML 급등주 5분 스캔 (한국장 + 미국장 자동 필터링)
     schedule.every(5).minutes.do(scan_growth_signals)

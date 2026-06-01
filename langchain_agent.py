@@ -181,6 +181,68 @@ def cancel_conditional_order(order_id: str) -> str:
     return _call_cancel_conditional_order(order_id)
 
 
+@tool
+def list_trade_records(status: str = "all") -> str:
+    """
+    매매 이력 CSV를 조회합니다.
+    status: 'open'(미청산), 'closed'(청산완료), 'all'(전체)
+    """
+    from trade_logger import _read_all
+    rows = _read_all()
+    if status == "open":
+        rows = [r for r in rows if not r.get("exit_date")]
+    elif status == "closed":
+        rows = [r for r in rows if r.get("exit_date")]
+    if not rows:
+        return f"({status}) 매매 이력 없음"
+    lines = [f"총 {len(rows)}건:"]
+    for r in rows[-20:]:  # 최근 20건
+        pnl = f" | 손익 {r['pnl_pct']}%" if r.get("pnl_pct") else ""
+        lines.append(
+            f"[{r['trade_id']}] {r['entry_date']} {r['ticker']} {r['name']} "
+            f"{r['qty']}주 진입가={r['entry_price']}{pnl}"
+        )
+    return "\n".join(lines)
+
+
+@tool
+def edit_trade_record(trade_id: str, field: str, value: str) -> str:
+    """
+    매매 이력 CSV의 특정 항목을 수정합니다.
+    trade_id: 수정할 거래 ID (list_trade_records로 확인)
+    field: 수정할 컬럼명 (entry_price, exit_price, qty, entry_date, exit_date, strategy, notes, win_prob, name 등)
+    value: 새로운 값
+    수정 불가 컬럼: trade_id, ticker, side
+    """
+    from trade_logger import _read_all, _write_all
+    IMMUTABLE = {"trade_id", "ticker", "side"}
+    if field in IMMUTABLE:
+        return f"⚠️ '{field}'는 수정 불가 컬럼입니다."
+    rows = _read_all()
+    target = next((r for r in rows if r["trade_id"] == trade_id), None)
+    if not target:
+        return f"⚠️ trade_id '{trade_id}'를 찾을 수 없습니다."
+    old_val = target.get(field, "")
+    target[field] = value
+    # pnl 재계산 (entry_price 또는 exit_price 변경 시)
+    if field in ("entry_price", "exit_price") and target.get("exit_price") and target.get("entry_price"):
+        try:
+            ep = float(target["entry_price"])
+            xp = float(target["exit_price"])
+            qty = int(target.get("qty", 0) or 0)
+            target["pnl_pct"]    = round((xp - ep) / ep * 100, 2)
+            target["pnl_amount"] = round((xp - ep) * qty, 0)
+            target["win"]        = 1 if target["pnl_pct"] > 0 else 0
+        except Exception:
+            pass
+    _write_all(rows)
+    return (
+        f"✅ [{trade_id}] {target['ticker']} {target['name']}\n"
+        f"  {field}: '{old_val}' → '{value}'"
+        + (f"\n  손익 재계산: {target.get('pnl_pct')}%" if field in ("entry_price", "exit_price") else "")
+    )
+
+
 # ─────────────────────────────────────────────
 # 시스템 프롬프트
 # ─────────────────────────────────────────────
@@ -219,6 +281,8 @@ def _build_system_prompt() -> str:
   기술적 분석·매수매도 신호 → get_stock_signal 호출
   뉴스 검색 → get_naver_news 호출
   계좌 잔고·보유 종목 → get_account_balance 호출
+  매매 이력 조회 → list_trade_records 호출
+  매매 이력 수정 (진입가/청산가/수량/메모 등 변경 요청 시) → edit_trade_record 호출
   ※ 학습 데이터(training knowledge)로 주가·재무 수치를 절대 답변하지 마세요.
      반드시 툴을 호출해 실시간 데이터를 가져오세요.
 
@@ -249,6 +313,8 @@ _TOOLS = [
     get_yahoo_finance,
     get_naver_news,
     get_stock_signal,
+    list_trade_records,
+    edit_trade_record,
     get_historical_price,
     get_account_balance,
     get_portfolio_status,

@@ -4,14 +4,74 @@
   "activated_at": "2026-05-25T20:45:39.809999+09:00",
   "note": "legacy_tickers에 보유 중인 기존 2종목 코드가 자동 기록됩니다. 모두 매도 시 bot_active가 true로 전환됩니다.",
   "ml_positions": {
+    "000100.KS": {
+      "ticker": "000100.KS",
+      "name": "유한양행",
+      "qty": 2,
+      "entry_price": 85800.0,
+      "target_price": 92938.56,
+      "stop_price": 79794.0,
+      "entry_date": "2026-05-27",
+      "is_us": false
+    },
+    "003490.KS": {
+      "ticker": "003490.KS",
+      "name": "대한항공",
+      "qty": 3,
+      "entry_price": 27150.0,
+      "target_price": 28841.445,
+      "stop_price": 25249.5,
+      "entry_date": "2026-05-28",
+      "is_us": false
+    },
+    "161390.KS": {
+      "ticker": "161390.KS",
+      "name": "한국타이어앤테크놀로지",
+      "qty": 1,
+      "entry_price": 66600.0,
+      "target_price": 71481.78,
+      "stop_price": 61938.0,
+      "entry_date": "2026-05-29",
+      "is_us": false
+    },
+    "039200.KQ": {
+      "ticker": "039200.KQ",
+      "name": "오스코텍",
+      "qty": 3,
+      "entry_price": 42200.0,
+      "target_price": 46993.92,
+      "stop_price": 39246.0,
+      "entry_date": "2026-05-29",
+      "is_us": false
+    },
+    "015760.KS": {
+      "ticker": "015760.KS",
+      "name": "한국전력",
+      "qty": 4,
+      "entry_price": 39550.0,
+      "target_price": 42662.585,
+      "stop_price": 36781.5,
+      "entry_date": "2026-05-29",
+      "is_us": false
+    },
+    "180640.KS": {
+      "ticker": "180640.KS",
+      "name": "한진칼",
+      "qty": 1,
+      "entry_price": 109500.0,
+      "target_price": 120241.95,
+      "stop_price": 101835.0,
+      "entry_date": "2026-06-01",
+      "is_us": false
+    },
     "016360.KS": {
       "ticker": "016360.KS",
       "name": "삼성증권",
       "qty": 1,
-      "entry_price": 127000.0,
-      "target_price": 136080.5,
-      "stop_price": 118110.0,
-      "entry_date": "2026-05-27",
+      "entry_price": 129000.0,
+      "target_price": 138223.5,
+      "stop_price": 119970.0,
+      "entry_date": "2026-06-01",
       "is_us": false
     }
   }

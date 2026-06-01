@@ -5,7 +5,7 @@
 
 ## 자동 훅 (`.claude/settings.json`)
 - `.py` / `.md` 파일 수정 시 → **GitHub 자동 커밋·푸시** (`.claude/git-autopush.sh`)
-- `.py` 파일 수정 시 → 텔레그램 봇 자동 재시작 (`com.quant.telegrambot.plist`)
+- `.py` 파일 수정 시 → 텔레그램 봇 + 스케줄러 자동 재시작 (`com.quant.telegrambot.plist` + `com.quant.trader.plist`)
 - `.py` 파일 수정 시 → **README.md 자동 업데이트** (`.claude/readme-update.sh`) — git diff 기반으로 Claude가 변경 내용만 반영
 
 ## 훅 사용 규칙 (반드시 준수)

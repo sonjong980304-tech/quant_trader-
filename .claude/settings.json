@@ -6,8 +6,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "jq -r '.tool_input.file_path // .tool_response.filePath // \"\"' | { read -r f; echo \"$f\" | grep -q '\\.py$' && launchctl unload ~/Library/LaunchAgents/com.quant.telegrambot.plist && launchctl load ~/Library/LaunchAgents/com.quant.telegrambot.plist; } 2>/dev/null || true",
-            "statusMessage": "텔레그램 봇 재시작 중...",
+            "command": "jq -r '.tool_input.file_path // .tool_response.filePath // \"\"' | { read -r f; echo \"$f\" | grep -q '\\.py$' && launchctl unload ~/Library/LaunchAgents/com.quant.telegrambot.plist && launchctl load ~/Library/LaunchAgents/com.quant.telegrambot.plist && launchctl unload ~/Library/LaunchAgents/com.quant.trader.plist && launchctl load ~/Library/LaunchAgents/com.quant.trader.plist; } 2>/dev/null || true",
+            "statusMessage": "봇·스케줄러 재시작 중...",
             "async": true
           },
           {

@@ -377,12 +377,16 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/addstock 코드 이름  — 종목 추가\n"
         "/removestock 코드    — 종목 삭제\n\n"
         "<b>[수동 매매]</b>\n"
-        "/buy 코드 수량       — 수동 매수\n"
-        "  예) /buy 010140 10\n"
+        "/buy 코드 수량       — 수동 매수 (국내/미국 자동 감지)\n"
+        "  예) /buy 005930 1  또는  /buy AAPL 5\n"
         "/sell 코드 수량      — 수동 매도\n"
-        "  예) /sell 010140 5\n"
+        "  예) /sell 010140 5  또는  /sell AAPL 3\n"
         "/sellall 코드        — 전량 매도\n"
         "  예) /sellall 010140\n\n"
+        "<b>[다음 장 예약 주문]</b>\n"
+        "/buynext 코드 수량   — 다음 장 시작 시 매수\n"
+        "/sellnext 코드 수량  — 다음 장 시작 시 매도\n"
+        "/pendingorders       — 예약 주문 조회/취소\n\n"
         "<b>[AI 어시스턴트]</b>\n"
         "메시지 전송          — GPT 자동 답변\n"
         "/ask 질문            — 명시적 GPT 질문\n"
@@ -410,9 +414,9 @@ async def cmd_buy(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     raw  = args[0].upper()
     code = raw.replace(".KS", "").replace(".KQ", "")
-    # 서픽스 보존 (.KS/.KQ 포함 시 CSV에 그대로 기록)
     suffix = ".KS" if ".KS" in raw else (".KQ" if ".KQ" in raw else "")
-    ticker = code + suffix  # ex) "005930.KS" or "005930"
+    ticker = code + suffix
+    is_us  = not (raw.endswith(".KS") or raw.endswith(".KQ")) and any(c.isalpha() for c in code)
 
     try:
         qty = int(args[1])
@@ -422,45 +426,58 @@ async def cmd_buy(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ 수량은 1 이상의 정수여야 합니다.")
         return
 
-    await update.message.reply_text(f"⏳ {ticker} {qty}주 시장가 매수 주문 중...")
+    market_tag = "🇺🇸 미국" if is_us else "🇰🇷 국내"
+    await update.message.reply_text(f"⏳ [{market_tag}] {ticker} {qty}주 시장가 매수 주문 중...")
 
     try:
         from trader import KISTrader
         t = KISTrader()
 
-        # 현재가 조회
-        price_info = t.get_current_price(code)
-        price      = price_info["price"]
-        name       = price_info.get("name", ticker)
-        total      = price * qty
-
-        # 주문 가능 금액 확인
-        cash = t.get_available_cash()
-        if cash < total:
+        if is_us:
+            price_info = t.get_us_current_price(code)
+            price      = price_info["price"]
+            name       = code
+            total_usd  = price * qty
+            t.buy_us(code, qty)
+            try:
+                from trade_logger import log_buy
+                log_buy(ticker, name, price, qty, strategy="수동")
+            except Exception as log_e:
+                logger.warning("[TradeLog] 수동 매수 기록 실패 [%s]: %s", ticker, log_e)
             await update.message.reply_text(
-                f"⚠️ 주문 가능 금액 부족\n"
-                f"필요: {total:,}원 | 가능: {cash:,}원"
+                f"✅ <b>매수 주문 완료 (미국)</b>\n"
+                f"종목: {name} ({ticker})\n"
+                f"수량: {qty}주\n"
+                f"현재가: ${price:,.2f}\n"
+                f"총 금액: ${total_usd:,.2f}",
+                parse_mode="HTML"
             )
-            return
-
-        t.buy(code, qty)
-
-        # CSV 매수 기록
-        try:
-            from trade_logger import log_buy
-            log_buy(ticker, name, price, qty, strategy="수동")
-        except Exception as log_e:
-            logger.warning("[TradeLog] 수동 매수 기록 실패 [%s]: %s", ticker, log_e)
-
-        logger.info("수동 매수 완료: %s %d주 @ %d원", ticker, qty, price)
-        await update.message.reply_text(
-            f"✅ <b>매수 주문 완료</b>\n"
-            f"종목: {name} ({ticker})\n"
-            f"수량: {qty}주\n"
-            f"현재가: {price:,}원\n"
-            f"총 금액: {total:,}원",
-            parse_mode="HTML"
-        )
+        else:
+            price_info = t.get_current_price(code)
+            price      = price_info["price"]
+            name       = price_info.get("name", ticker)
+            total      = price * qty
+            cash = t.get_available_cash()
+            if cash < total:
+                await update.message.reply_text(
+                    f"⚠️ 주문 가능 금액 부족\n필요: {total:,}원 | 가능: {cash:,}원"
+                )
+                return
+            t.buy(code, qty)
+            try:
+                from trade_logger import log_buy
+                log_buy(ticker, name, price, qty, strategy="수동")
+            except Exception as log_e:
+                logger.warning("[TradeLog] 수동 매수 기록 실패 [%s]: %s", ticker, log_e)
+            logger.info("수동 매수 완료: %s %d주 @ %d원", ticker, qty, price)
+            await update.message.reply_text(
+                f"✅ <b>매수 주문 완료</b>\n"
+                f"종목: {name} ({ticker})\n"
+                f"수량: {qty}주\n"
+                f"현재가: {price:,}원\n"
+                f"총 금액: {total:,}원",
+                parse_mode="HTML"
+            )
     except Exception as e:
         logger.error("수동 매수 실패 [%s]: %s", ticker, e)
         await update.message.reply_text(f"⚠️ 매수 주문 실패: {e}")
@@ -479,7 +496,12 @@ async def cmd_sell(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    code = args[0].upper().replace(".KS", "").replace(".KQ", "")
+    raw    = args[0].upper()
+    code   = raw.replace(".KS", "").replace(".KQ", "")
+    suffix = ".KS" if ".KS" in raw else (".KQ" if ".KQ" in raw else "")
+    ticker = code + suffix
+    is_us  = not (raw.endswith(".KS") or raw.endswith(".KQ")) and any(c.isalpha() for c in code)
+
     try:
         qty = int(args[1])
         if qty <= 0:
@@ -488,37 +510,57 @@ async def cmd_sell(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ 수량은 1 이상의 정수여야 합니다.")
         return
 
-    await update.message.reply_text(f"⏳ {code} {qty}주 시장가 매도 주문 중...")
+    market_tag = "🇺🇸 미국" if is_us else "🇰🇷 국내"
+    await update.message.reply_text(f"⏳ [{market_tag}] {ticker} {qty}주 시장가 매도 주문 중...")
 
     try:
         from trader import KISTrader
         t = KISTrader()
 
-        # 보유 수량 확인
-        balance = t.get_balance()
-        holding = next((b for b in balance if b["stock_code"] == code), None)
-        if not holding:
-            await update.message.reply_text(f"⚠️ {code} 보유 종목이 없습니다.")
-            return
-        if holding["qty"] < qty:
+        if is_us:
+            us_bal  = t.get_us_balance()
+            holding = next((b for b in us_bal if b["symbol"] == code), None)
+            if not holding or holding["qty"] < qty:
+                held = holding["qty"] if holding else 0
+                await update.message.reply_text(f"⚠️ {code} 보유 수량 부족 (보유: {held}주)")
+                return
+            price_info = t.get_us_current_price(code)
+            price      = price_info["price"]
+            t.sell_us(code, qty)
+            try:
+                from trade_logger import log_sell
+                log_sell(ticker, price, qty=qty, notes="수동매도")
+            except Exception as log_e:
+                logger.warning("[TradeLog] 수동 매도 기록 실패 [%s]: %s", ticker, log_e)
             await update.message.reply_text(
-                f"⚠️ 보유 수량 부족\n"
-                f"요청: {qty}주 | 보유: {holding['qty']}주"
+                f"✅ <b>매도 주문 완료 (미국)</b>\n"
+                f"종목: {code}\n수량: {qty}주\n현재가: ${price:,.2f}",
+                parse_mode="HTML"
             )
-            return
-
-        price_info = t.get_current_price(code)
-        price      = price_info["price"]
-
-        t.sell(code, qty)
-        await update.message.reply_text(
-            f"✅ <b>매도 주문 완료</b>\n"
-            f"종목: {code}\n"
-            f"수량: {qty}주\n"
-            f"현재가: {price:,}원\n"
-            f"예상 금액: {price * qty:,}원",
-            parse_mode="HTML"
-        )
+        else:
+            balance = t.get_balance()
+            holding = next((b for b in balance if b["stock_code"] == code), None)
+            if not holding:
+                await update.message.reply_text(f"⚠️ {code} 보유 종목이 없습니다.")
+                return
+            if holding["qty"] < qty:
+                await update.message.reply_text(
+                    f"⚠️ 보유 수량 부족\n요청: {qty}주 | 보유: {holding['qty']}주"
+                )
+                return
+            price_info = t.get_current_price(code)
+            price      = price_info["price"]
+            t.sell(code, qty)
+            try:
+                from trade_logger import log_sell
+                log_sell(ticker, price, qty=qty, notes="수동매도")
+            except Exception as log_e:
+                logger.warning("[TradeLog] 수동 매도 기록 실패 [%s]: %s", ticker, log_e)
+            await update.message.reply_text(
+                f"✅ <b>매도 주문 완료</b>\n"
+                f"종목: {code}\n수량: {qty}주\n현재가: {price:,}원\n예상 금액: {price * qty:,}원",
+                parse_mode="HTML"
+            )
     except Exception as e:
         await update.message.reply_text(f"⚠️ 매도 주문 실패: {e}")
 
@@ -537,37 +579,167 @@ async def cmd_sellall(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    code = args[0].upper().replace(".KS", "").replace(".KQ", "")
-    await update.message.reply_text(f"⏳ {code} 전량 매도 주문 중...")
+    raw    = args[0].upper()
+    code   = raw.replace(".KS", "").replace(".KQ", "")
+    suffix = ".KS" if ".KS" in raw else (".KQ" if ".KQ" in raw else "")
+    ticker = code + suffix
+    is_us  = not (raw.endswith(".KS") or raw.endswith(".KQ")) and any(c.isalpha() for c in code)
+
+    market_tag = "🇺🇸 미국" if is_us else "🇰🇷 국내"
+    await update.message.reply_text(f"⏳ [{market_tag}] {ticker} 전량 매도 주문 중...")
 
     try:
         from trader import KISTrader
         t = KISTrader()
 
-        balance = t.get_balance()
-        holding = next((b for b in balance if b["stock_code"] == code), None)
-        if not holding or holding["qty"] == 0:
-            await update.message.reply_text(f"⚠️ {code} 보유 종목이 없습니다.")
-            return
-
-        qty        = holding["qty"]
-        price_info = t.get_current_price(code)
-        price      = price_info["price"]
-
-        t.sell(code, qty)
-        await update.message.reply_text(
-            f"✅ <b>전량 매도 주문 완료</b>\n"
-            f"종목: {code} ({holding['name']})\n"
-            f"수량: {qty}주 (전량)\n"
-            f"현재가: {price:,}원\n"
-            f"예상 금액: {price * qty:,}원",
-            parse_mode="HTML"
-        )
+        if is_us:
+            us_bal  = t.get_us_balance()
+            holding = next((b for b in us_bal if b["symbol"] == code), None)
+            if not holding or holding["qty"] == 0:
+                await update.message.reply_text(f"⚠️ {code} 미국주식 보유 없음")
+                return
+            qty        = holding["qty"]
+            price_info = t.get_us_current_price(code)
+            price      = price_info["price"]
+            t.sell_us(code, qty)
+            try:
+                from trade_logger import log_sell
+                log_sell(ticker, price, qty=qty, notes="수동전량매도")
+            except Exception as log_e:
+                logger.warning("[TradeLog] 수동 매도 기록 실패 [%s]: %s", ticker, log_e)
+            await update.message.reply_text(
+                f"✅ <b>전량 매도 완료 (미국)</b>\n"
+                f"종목: {code}\n수량: {qty}주\n현재가: ${price:,.2f}",
+                parse_mode="HTML"
+            )
+        else:
+            balance = t.get_balance()
+            holding = next((b for b in balance if b["stock_code"] == code), None)
+            if not holding or holding["qty"] == 0:
+                await update.message.reply_text(f"⚠️ {code} 보유 종목이 없습니다.")
+                return
+            qty        = holding["qty"]
+            price_info = t.get_current_price(code)
+            price      = price_info["price"]
+            t.sell(code, qty)
+            try:
+                from trade_logger import log_sell
+                log_sell(ticker, price, qty=qty, notes="수동전량매도")
+            except Exception as log_e:
+                logger.warning("[TradeLog] 수동 매도 기록 실패 [%s]: %s", ticker, log_e)
+            await update.message.reply_text(
+                f"✅ <b>전량 매도 주문 완료</b>\n"
+                f"종목: {code} ({holding.get('name', code)})\n"
+                f"수량: {qty}주 (전량)\n"
+                f"현재가: {price:,}원\n"
+                f"예상 금액: {price * qty:,}원",
+                parse_mode="HTML"
+            )
     except Exception as e:
         await update.message.reply_text(f"⚠️ 전량 매도 실패: {e}")
 
 
 # ─────────────────────────────────────────────
+# /buynext /sellnext — 다음 장 예약 주문
+# ─────────────────────────────────────────────
+async def cmd_buynext(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """다음 장 시작 시 매수 예약. 사용법: /buynext <코드> <수량>"""
+    args = ctx.args
+    if len(args) < 2:
+        await update.message.reply_text(
+            "사용법: /buynext <종목코드> <수량>\n"
+            "예) /buynext 005930 10  또는  /buynext AAPL 5\n"
+            "다음 장 시작 시 자동 실행됩니다."
+        )
+        return
+    raw    = args[0].upper()
+    code   = raw.replace(".KS", "").replace(".KQ", "")
+    suffix = ".KS" if ".KS" in raw else (".KQ" if ".KQ" in raw else "")
+    ticker = code + suffix
+    is_us  = not (raw.endswith(".KS") or raw.endswith(".KQ")) and any(c.isalpha() for c in code)
+    try:
+        qty = int(args[1])
+        if qty <= 0:
+            raise ValueError
+    except ValueError:
+        await update.message.reply_text("⚠️ 수량은 1 이상의 정수여야 합니다.")
+        return
+    from pending_orders import add_pending_order, list_pending_orders
+    order_id = add_pending_order("BUY", ticker, code, qty, is_us)
+    market_tag = "🇺🇸 미국장" if is_us else "🇰🇷 한국장"
+    pending = list_pending_orders()
+    await update.message.reply_text(
+        f"✅ <b>다음 장 매수 예약 완료</b>\n"
+        f"종목: {ticker}  수량: {qty}주\n"
+        f"실행 시점: {market_tag} 시작 시\n"
+        f"예약 ID: {order_id}\n\n"
+        f"📋 전체 예약 {len(pending)}건 대기 중",
+        parse_mode="HTML"
+    )
+
+
+async def cmd_sellnext(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """다음 장 시작 시 매도 예약. 사용법: /sellnext <코드> <수량>"""
+    args = ctx.args
+    if len(args) < 2:
+        await update.message.reply_text(
+            "사용법: /sellnext <종목코드> <수량>\n"
+            "예) /sellnext 005930 10  또는  /sellnext AAPL 5\n"
+            "다음 장 시작 시 자동 실행됩니다."
+        )
+        return
+    raw    = args[0].upper()
+    code   = raw.replace(".KS", "").replace(".KQ", "")
+    suffix = ".KS" if ".KS" in raw else (".KQ" if ".KQ" in raw else "")
+    ticker = code + suffix
+    is_us  = not (raw.endswith(".KS") or raw.endswith(".KQ")) and any(c.isalpha() for c in code)
+    try:
+        qty = int(args[1])
+        if qty <= 0:
+            raise ValueError
+    except ValueError:
+        await update.message.reply_text("⚠️ 수량은 1 이상의 정수여야 합니다.")
+        return
+    from pending_orders import add_pending_order, list_pending_orders
+    order_id = add_pending_order("SELL", ticker, code, qty, is_us)
+    market_tag = "🇺🇸 미국장" if is_us else "🇰🇷 한국장"
+    pending = list_pending_orders()
+    await update.message.reply_text(
+        f"✅ <b>다음 장 매도 예약 완료</b>\n"
+        f"종목: {ticker}  수량: {qty}주\n"
+        f"실행 시점: {market_tag} 시작 시\n"
+        f"예약 ID: {order_id}\n\n"
+        f"📋 전체 예약 {len(pending)}건 대기 중",
+        parse_mode="HTML"
+    )
+
+
+async def cmd_pendingorders(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """예약 주문 목록 조회."""
+    from pending_orders import list_pending_orders, remove_pending_order
+    args = ctx.args
+    if args and args[0].lower() == "cancel" and len(args) > 1:
+        from pending_orders import remove_pending_order
+        ok = remove_pending_order(args[1])
+        await update.message.reply_text(
+            f"✅ 예약 취소 완료 ({args[1]})" if ok else f"⚠️ ID {args[1]} 예약 없음"
+        )
+        return
+    orders = list_pending_orders()
+    if not orders:
+        await update.message.reply_text("📋 대기 중인 예약 주문 없음")
+        return
+    lines = ["📋 <b>예약 주문 목록</b>"]
+    for o in orders:
+        flag = "🇺🇸" if o["is_us"] else "🇰🇷"
+        lines.append(
+            f"{flag} [{o['id']}] {o['action']} {o['ticker']} {o['qty']}주  "
+            f"({o['added_at']})"
+        )
+    lines.append("\n취소: /pendingorders cancel <ID>")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+
 # /portfolio — 안전자산 포트폴리오 현황
 # ─────────────────────────────────────────────
 async def cmd_portfolio(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -792,9 +964,12 @@ def main():
     app.add_handler(CommandHandler("stocks",       cmd_stocks))
     app.add_handler(CommandHandler("addstock",     cmd_addstock))
     app.add_handler(CommandHandler("removestock",  cmd_removestock))
-    app.add_handler(CommandHandler("buy",          cmd_buy))
-    app.add_handler(CommandHandler("sell",         cmd_sell))
-    app.add_handler(CommandHandler("sellall",      cmd_sellall))
+    app.add_handler(CommandHandler("buy",           cmd_buy))
+    app.add_handler(CommandHandler("sell",          cmd_sell))
+    app.add_handler(CommandHandler("sellall",       cmd_sellall))
+    app.add_handler(CommandHandler("buynext",       cmd_buynext))
+    app.add_handler(CommandHandler("sellnext",      cmd_sellnext))
+    app.add_handler(CommandHandler("pendingorders", cmd_pendingorders))
     app.add_handler(CommandHandler("help",         cmd_help))
     app.add_handler(CommandHandler("ask",          cmd_ask))
     app.add_handler(CommandHandler("reset",        cmd_reset))
