@@ -407,7 +407,7 @@ def _get_current_price(ticker: str):
 
 
 def _trading_days_elapsed(entry_date_str: str) -> int:
-    """입력 날짜부터 오늘까지 거래일(평일) 수."""
+    """입력 날짜부터 오늘까지 KRX 거래일(공휴일 포함) 수."""
     from datetime import date as date_cls
     start = date_cls.fromisoformat(entry_date_str)
     today = date_cls.today()
@@ -415,7 +415,7 @@ def _trading_days_elapsed(entry_date_str: str) -> int:
     d     = start
     while d < today:
         d += timedelta(days=1)
-        if d.weekday() < 5:
+        if is_kr_trading_day(d):  # 주말 + 공휴일 제외
             days += 1
     return days
 
@@ -512,20 +512,17 @@ def _is_kr_market() -> bool:
 
 
 def _is_us_market() -> bool:
-    """미국 장 여부 (서머타임 자동 감지)."""
-    now = datetime.now(KST)
-    if now.weekday() >= 5:
-        return False
-    t = now.hour * 60 + now.minute
-    # 서머타임(3~11월): 22:30~05:00 / 동절기: 23:30~06:00
+    """미국 장 여부 (서머타임 자동 감지).
+    ET 기준 월~금 09:30~16:00 를 KST로 역산해 판단.
+    KST 기준 요일이 아닌 ET 기준 요일로 체크해야 일요일 밤(US 월요일) 누락을 방지.
+    """
     import pytz
     eastern = pytz.timezone("America/New_York")
-    now_et  = now.astimezone(eastern)
-    dst     = bool(now_et.dst())
-    if dst:
-        return t >= 22 * 60 + 30 or t <= 5 * 60
-    else:
-        return t >= 23 * 60 + 30 or t <= 6 * 60
+    now_et  = datetime.now(KST).astimezone(eastern)
+    if now_et.weekday() >= 5:   # ET 기준 주말
+        return False
+    et_min = now_et.hour * 60 + now_et.minute
+    return 9 * 60 + 30 <= et_min < 16 * 60
 
 
 # ─────────────────────────────────────────────
@@ -551,7 +548,10 @@ def scan_growth_signals():
         try:
             t           = KISTrader()
             total_asset = _get_total_asset(t)
-            growth_cash = total_asset * GROWTH_ASSET_RATIO
+            if total_asset > 0:
+                growth_cash = total_asset * GROWTH_ASSET_RATIO
+            else:
+                logger.warning("총 자산 조회 0원 — 기본값 사용 (%.0f원)", growth_cash)
         except Exception as e:
             logger.warning("총 자산 조회 실패: %s", e)
 
