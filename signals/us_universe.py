@@ -85,6 +85,7 @@ def get_us_candidates(top_n: int = 50) -> dict[str, str]:
                 period="22d",
                 auto_adjust=True,
                 progress=False,
+                threads=False,   # SQLite 캐시 동시 접근 충돌 방지
             )
         except Exception as e:
             logger.warning("yfinance 배치 다운로드 실패 (%d~%d): %s",
