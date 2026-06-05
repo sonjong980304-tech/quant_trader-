@@ -73,6 +73,16 @@
       "stop_price": 101277.0,
       "entry_date": "2026-06-05",
       "is_us": false
+    },
+    "090360.KQ": {
+      "ticker": "090360.KQ",
+      "name": "로보스타",
+      "qty": 1,
+      "entry_price": 146700.0,
+      "target_price": 169570.53,
+      "stop_price": 136431.0,
+      "entry_date": "2026-06-05",
+      "is_us": false
     }
   }
 }

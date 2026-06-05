@@ -23,6 +23,8 @@ MIN_RISK_REWARD = 1.5    # 최소 기대값 손익비 (win_prob 가중 기대값
 MIN_TRIGGERS    = 1      # 기술적 트리거 최소 1개 이상
 MIN_MODEL_AUC   = 0.58   # 최소 모델 예측력 (0.5 = 동전던지기, 0.58+ = 참고 가능)
 
+BEAR_AVG_WIN_PENALTY = 0.4   # 약세장 avg_win 보정 계수
+
 # 트리거 → 에이전트 매핑
 _MOMENTUM_TRIGGERS  = {"거래량폭발", "BB스퀴즈돌파"}
 _REVERSION_TRIGGERS = {"BB하단반등", "RSI과매도탈출", "이격도저점"}
@@ -81,6 +83,18 @@ def _projected_volume(df: pd.DataFrame) -> float:
             return last_vol
 
     return last_vol  # 과거 데이터 or 장 외 시간
+
+
+def _compute_atr(df: pd.DataFrame, period: int = 14) -> float:
+    """ATR(14) 계산."""
+    high  = df["High"]
+    low   = df["Low"]
+    close = df["Close"]
+    prev  = close.shift(1)
+    tr    = pd.concat([(high - low), (high - prev).abs(), (low - prev).abs()], axis=1).max(axis=1)
+    atr   = tr.rolling(period).mean()
+    val   = float(atr.iloc[-1])
+    return val if not np.isnan(val) else float(tr.iloc[-period:].mean())
 
 
 # ─────────────────────────────────────────────
@@ -151,7 +165,7 @@ def detect_triggers(df: pd.DataFrame) -> list[str]:
 # 단일 종목 스캔
 # ─────────────────────────────────────────────
 
-def _eval_agent(df: pd.DataFrame, ticker: str, agent: str) -> dict | None:
+def _eval_agent(df: pd.DataFrame, ticker: str, agent: str, is_bear: bool = False) -> dict | None:
     """단일 에이전트 예측. 조건 미충족 시 None."""
     from ml.model import predict
     pred = predict(df, ticker, agent=agent)
@@ -171,16 +185,19 @@ def _eval_agent(df: pd.DataFrame, ticker: str, agent: str) -> dict | None:
         logger.debug("  [%s][%s] 승률 %.1f%% < %.0f%% — 패스",
                      ticker, agent, win_prob * 100, MIN_WIN_PROB * 100)
         return None
-    expected_win  = avg_win  * win_prob
+    # 약세장 avg_win 보정
+    effective_avg_win = avg_win * BEAR_AVG_WIN_PENALTY if is_bear else avg_win
+    expected_win  = effective_avg_win * win_prob
     expected_loss = avg_loss * (1 - win_prob)
     rr = expected_win / expected_loss if expected_loss > 0 else 0.0
     if rr < MIN_RISK_REWARD:
         logger.debug("  [%s][%s] 손익비 %.2f < %.1f — 패스", ticker, agent, rr, MIN_RISK_REWARD)
         return None
-    return {**pred, "risk_reward": round(rr, 2), "agent": agent}
+    return {**pred, "risk_reward": round(rr, 2), "agent": agent,
+            "avg_win_effective": effective_avg_win}
 
 
-def scan_ticker(ticker: str, df: pd.DataFrame) -> dict | None:
+def scan_ticker(ticker: str, df: pd.DataFrame, is_bear: bool = False) -> dict | None:
     """
     단일 종목에 대해 트리거 → 에이전트 분기 → 최종 에이전트 결합 → 신호 판단.
 
@@ -208,11 +225,11 @@ def scan_ticker(ticker: str, df: pd.DataFrame) -> dict | None:
     # ── 에이전트별 예측 ──────────────────────────────────────
     candidates = []
     if has_momentum:
-        result = _eval_agent(df, ticker, "momentum")
+        result = _eval_agent(df, ticker, "momentum", is_bear=is_bear)
         if result:
             candidates.append(result)
     if has_reversion:
-        result = _eval_agent(df, ticker, "reversion")
+        result = _eval_agent(df, ticker, "reversion", is_bear=is_bear)
         if result:
             candidates.append(result)
 
@@ -226,7 +243,7 @@ def scan_ticker(ticker: str, df: pd.DataFrame) -> dict | None:
     avg_win  = best["avg_win"]
     avg_loss = best["avg_loss"]
 
-    logger.info("  [%s] 🚨 신호 확정! 에이전트=%s 승률=%.1f%% 손익비=%.2f",
+    logger.info("  [%s] 신호 확정! 에이전트=%s 승률=%.1f%% 손익비=%.2f",
                 ticker, best["agent"], win_prob * 100, best["risk_reward"])
 
     return {
@@ -240,6 +257,7 @@ def scan_ticker(ticker: str, df: pd.DataFrame) -> dict | None:
         "current_price": float(df["Close"].iloc[-1]),
         "model_acc":     best.get("model_acc"),
         "model_auc":     best.get("model_auc"),
+        "atr":           _compute_atr(df),
     }
 
 
@@ -247,12 +265,13 @@ def scan_ticker(ticker: str, df: pd.DataFrame) -> dict | None:
 # 전체 종목 스캔 (runner에서 호출)
 # ─────────────────────────────────────────────
 
-def scan_all(stocks: dict, fetch_fn) -> list[dict]:
+def scan_all(stocks: dict, fetch_fn, is_bear: bool = False) -> list[dict]:
     """
     관심종목 전체 스캔.
 
     stocks   : {ticker: name}
     fetch_fn : ticker → pd.DataFrame (OHLCV)
+    is_bear  : 약세장 플래그 (avg_win 패널티 적용)
 
     반환: 신호 발생 종목 리스트
     """
@@ -263,7 +282,7 @@ def scan_all(stocks: dict, fetch_fn) -> list[dict]:
             continue
         try:
             df = fetch_fn(ticker)
-            result = scan_ticker(ticker, df)
+            result = scan_ticker(ticker, df, is_bear=is_bear)
             if result:
                 result["name"] = name
                 signals.append(result)

@@ -31,6 +31,7 @@ from morning_briefer import send_morning_briefing
 from signals.scanner import scan_all
 from signals.alert import send_signal_alert
 from market_calendar import is_kr_trading_day
+from market_regime import get_market_regime
 
 KST      = pytz.timezone("Asia/Seoul")
 LOG_FILE = "logs/trader.log"
@@ -370,25 +371,31 @@ def is_bot_active() -> bool:
 # ─────────────────────────────────────────────
 
 def save_ml_position(ticker: str, name: str, qty: int, entry_price: float,
-                     avg_win: float, is_us: bool = False):
+                     avg_win: float, atr: float = 0.0, is_us: bool = False):
     """매수 확정 시 ML 포지션 저장."""
     state = _load_state()
     positions = state.setdefault("ml_positions", {})
     target_price = entry_price * (1 + avg_win)
-    stop_price   = entry_price * 0.93  # 손절 -7%
+    # ATR 기반 손절 (atr=0이면 기존 -7% 폴백)
+    if atr > 0:
+        stop_price = entry_price - 2.0 * atr
+    else:
+        stop_price = entry_price * 0.93
     positions[ticker] = {
-        "ticker":       ticker,
-        "name":         name,
-        "qty":          qty,
-        "entry_price":  round(entry_price, 4),
-        "target_price": round(target_price, 4),
-        "stop_price":   round(stop_price, 4),
-        "entry_date":   datetime.now(KST).strftime("%Y-%m-%d"),
-        "is_us":        is_us,
+        "ticker":        ticker,
+        "name":          name,
+        "qty":           qty,
+        "entry_price":   round(entry_price, 4),
+        "target_price":  round(target_price, 4),
+        "stop_price":    round(stop_price, 4),
+        "entry_date":    datetime.now(KST).strftime("%Y-%m-%d"),
+        "is_us":         is_us,
+        "atr":           round(atr, 4),
+        "highest_price": round(entry_price, 4),   # 트레일링스톱용 최고가 추적
     }
     _save_state(state)
-    logger.info("ML 포지션 저장: %s qty=%d entry=%.2f target=%.2f stop=%.2f",
-                ticker, qty, entry_price, target_price, stop_price)
+    logger.info("ML 포지션 저장: %s qty=%d entry=%.2f target=%.2f stop=%.2f atr=%.4f",
+                ticker, qty, entry_price, target_price, stop_price, atr)
 
 
 def _get_current_price(ticker: str):
@@ -443,15 +450,31 @@ def check_ml_positions():
             stop       = pos.get("stop_price", pos["entry_price"] * 0.93)
             is_us      = pos.get("is_us", False)
 
+            # 최고가 업데이트 (트레일링스톱용)
+            if cur_price and cur_price > pos.get("highest_price", pos["entry_price"]):
+                pos["highest_price"] = round(cur_price, 4)
+                state["ml_positions"][ticker] = pos
+                _save_state(state)  # 최고가 갱신 즉시 저장
+
+            highest = pos.get("highest_price", pos["entry_price"])
+            atr_val = pos.get("atr", 0.0)
+
             reason = None
             emoji  = "⏰"
             if cur_price and cur_price >= target:
-                reason = f"익절 (현재가 {cur_price:.2f} ≥ 목표 {target:.2f})"
+                reason = f"익절 (현재가 {cur_price:.4f} ≥ 목표 {target:.4f})"
                 emoji  = "✅"
             elif cur_price and cur_price <= stop:
-                reason = f"손절 (현재가 {cur_price:.2f} ≤ 손절가 {stop:.2f})"
+                reason = f"ATR손절 (현재가 {cur_price:.4f} ≤ 손절가 {stop:.4f})"
                 emoji  = "🔴"
-            elif elapsed >= 7:
+            elif cur_price and highest > pos["entry_price"]:
+                # 트레일링 스톱 (수익 구간에서만 활성화)
+                trail_pct = cur_price < highest * (1 - 0.025)
+                trail_atr = atr_val > 0 and cur_price < highest - atr_val
+                if trail_pct or trail_atr:
+                    reason = f"트레일링스톱 (고점 {highest:.4f} → 현재 {cur_price:.4f})"
+                    emoji  = "📉"
+            if reason is None and elapsed >= 7:
                 reason = f"7거래일 경과 ({elapsed}일)"
 
             if reason is None:
@@ -537,6 +560,14 @@ def scan_growth_signals():
     if not _check_activation():
         return
 
+    # 시장 상황 필터 (한국장만 적용 — 미국장은 KOSPI 기준 부적합)
+    is_blocked, is_bear = False, False
+    if _is_kr_market():
+        is_blocked, is_bear = get_market_regime()
+        if is_blocked:
+            logger.info("[MarketRegime] 매매 차단 (역배열) — 신호 스캔 생략")
+            return
+
     if not (_is_kr_market() or _is_us_market()):
         return
 
@@ -544,6 +575,7 @@ def scan_growth_signals():
     logger.info("급등주 신호 스캔 (%s)", now.strftime("%H:%M"))
 
     growth_cash = 10_000_000 * GROWTH_ASSET_RATIO
+    total_asset = 0.0
     if KIS_APP_KEY:
         try:
             t           = KISTrader()
@@ -599,7 +631,7 @@ def scan_growth_signals():
             minute_df = _fetch_minute_yf(ticker)
         return _append_today_bar(df, minute_df)
 
-    signals = scan_all(stocks_to_scan, _fetch_with_today)
+    signals = scan_all(stocks_to_scan, _fetch_with_today, is_bear=is_bear)
 
     if not signals:
         logger.debug("급등주 신호 없음")
@@ -628,18 +660,30 @@ def scan_growth_signals():
             except Exception as e:
                 logger.debug("KIS 현재가 조회 실패 [%s]: %s", ticker, e)
 
+        # 리스크동등화(Risk Parity): 총 자산의 1% 리스크 기준 수량 역산
+        is_us = not (ticker.endswith(".KS") or ticker.endswith(".KQ"))
+        atr = sig.get("atr", 0)
+        if atr > 0 and total_asset > 0:
+            _EXCHANGE_RATE_RP = 1400
+            if is_us:
+                risk_usd = (total_asset * 0.01) / _EXCHANGE_RATE_RP
+                rp_qty   = max(1, int(risk_usd / (2.0 * atr)))
+            else:
+                rp_qty   = max(1, int((total_asset * 0.01) / (2.0 * atr)))
+            sig["risk_parity_qty"] = rp_qty
+
         result = send_signal_alert(sig, growth_cash)
         _alerted_today[ticker] = today_str
 
         # 매수 성공 시 ML 포지션 저장 (익절/손절/7일 청산 추적용)
         if result.get("status") == "ok" and result.get("qty", 0) > 0:
-            is_us = not (ticker.endswith(".KS") or ticker.endswith(".KQ"))
             save_ml_position(
                 ticker       = ticker,
                 name         = sig.get("name", ticker),
                 qty          = result["qty"],
                 entry_price  = result["price"],
                 avg_win      = sig["avg_win"],
+                atr          = sig.get("atr", 0.0),
                 is_us        = is_us,
             )
 

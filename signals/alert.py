@@ -45,6 +45,13 @@ def _execute_buy(signal: dict, growth_cash: float) -> tuple[int, float, str]:
         growth_cash, signal["win_prob"], signal["avg_win"], signal["avg_loss"], price_for
     )
 
+    # 리스크동등화 qty가 있으면 켈리 qty와 min 적용
+    rp_qty = signal.get("risk_parity_qty")
+    if rp_qty and rp_qty > 0:
+        qty = min(qty, rp_qty)
+        if qty > 0:
+            logger.info("[%s] 최종 qty=%d (켈리 vs 리스크동등화 min)", ticker, qty)
+
     # 켈리 추천 0주 → 주문가능금액으로 최대 매수 재시도
     if qty <= 0 and KIS_APP_KEY:
         try:
@@ -126,6 +133,13 @@ def send_signal_alert(signal: dict, growth_cash: float) -> dict:
     try:
         qty_executed, exec_price, status = _execute_buy(signal, growth_cash)
 
+        atr_val   = signal.get("atr", 0)
+        stop_calc = signal["current_price"] - 2.0 * atr_val if atr_val > 0 else signal["current_price"] * 0.93
+        if us:
+            stop_str = f"${stop_calc:,.2f}"
+        else:
+            stop_str = f"{stop_calc:,.0f}원"
+
         if status == "skip_qty":
             exec_line = "⚠️ 켈리 기준 0주 — 1주 가격이 주문가능금액 초과, 매수 생략"
         elif status == "skip_no_key":
@@ -154,7 +168,8 @@ def send_signal_alert(signal: dict, growth_cash: float) -> dict:
             f"  승률:        <b>{win_prob:.1f}%</b>\n"
             f"  예상 수익:   <b>+{avg_win:.1f}%</b>\n"
             f"  예상 손실:   <b>-{avg_loss:.1f}%</b>\n"
-            f"  손익비:      <b>{rr:.2f}</b>\n\n"
+            f"  손익비:      <b>{rr:.2f}</b>\n"
+            f"  ATR손절가:   <b>{stop_str}</b>\n\n"
             f"💰 <b>켈리 추천</b> 비중 {kelly_f*100:.1f}% / {invest_str} / {qty}주\n\n"
             f"{exec_line}"
         )
