@@ -40,8 +40,10 @@ def _project_us_volume(current_vol: float) -> float:
     return current_vol / (elapsed / _US_TOTAL_MIN)
 
 
-def _get_sp500_tickers() -> list[str]:
-    """Wikipedia에서 S&P 500 티커 목록 조회 (User-Agent 설정으로 403 우회)."""
+def _get_sp500_tickers() -> tuple[list[str], dict[str, str]]:
+    """Wikipedia에서 S&P 500 티커·회사명 조회 (User-Agent 설정으로 403 우회).
+    반환: (tickers, {ticker: company_name})
+    """
     try:
         headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
         resp = requests.get(
@@ -51,11 +53,13 @@ def _get_sp500_tickers() -> list[str]:
         resp.raise_for_status()
         df = pd.read_html(io.StringIO(resp.text))[0]
         tickers = df["Symbol"].str.replace(".", "-", regex=False).tolist()
+        names   = df["Security"].tolist()
+        name_map = {t: n for t, n in zip(tickers, names)}
         logger.info("S&P 500 목록 조회 완료: %d종목", len(tickers))
-        return tickers
+        return tickers, name_map
     except Exception as e:
         logger.warning("S&P 500 목록 조회 실패: %s", e)
-        return []
+        return [], {}
 
 
 def get_us_candidates(top_n: int = 50) -> dict[str, str]:
@@ -69,7 +73,7 @@ def get_us_candidates(top_n: int = 50) -> dict[str, str]:
 
     반환: {ticker: ticker}  (이름 미제공 — ticker로 대체)
     """
-    tickers = _get_sp500_tickers()
+    tickers, name_map = _get_sp500_tickers()
     if not tickers:
         return {}
 
@@ -130,7 +134,7 @@ def get_us_candidates(top_n: int = 50) -> dict[str, str]:
     logger.info("S&P 500 %d종목 스크리닝 완료", len(tickers))
 
     top = sorted(vol_ratios, key=lambda t: vol_ratios[t], reverse=True)[:top_n]
-    candidates = {t: t for t in top}
+    candidates = {t: name_map.get(t, t) for t in top}  # ticker → 회사명
 
     logger.info("US 후보 종목: %d개 (S&P 500 필터)", len(candidates))
     return candidates
@@ -141,9 +145,9 @@ def get_us_backtest_universe(top_n: int = 100) -> dict[str, str]:
     백테스트용 US 유니버스 — S&P 500 전체 목록 (모멘텀 필터 없음).
     장 외 시간에도 동작.
     """
-    tickers = _get_sp500_tickers()
+    tickers, name_map = _get_sp500_tickers()
     if not tickers:
         return {}
-    result = {t: t for t in tickers[:top_n]}
+    result = {t: name_map.get(t, t) for t in tickers[:top_n]}
     logger.info("US 백테스트 유니버스: %d개", len(result))
     return result
