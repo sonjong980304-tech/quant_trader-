@@ -4,16 +4,6 @@
   "activated_at": "2026-05-25T20:45:39.809999+09:00",
   "note": "legacy_tickers에 보유 중인 기존 2종목 코드가 자동 기록됩니다. 모두 매도 시 bot_active가 true로 전환됩니다.",
   "ml_positions": {
-    "000100.KS": {
-      "ticker": "000100.KS",
-      "name": "유한양행",
-      "qty": 2,
-      "entry_price": 85800.0,
-      "target_price": 92938.56,
-      "stop_price": 79794.0,
-      "entry_date": "2026-05-27",
-      "is_us": false
-    },
     "039200.KQ": {
       "ticker": "039200.KQ",
       "name": "오스코텍",
@@ -44,14 +34,44 @@
       "entry_date": "2026-06-01",
       "is_us": false
     },
-    "082920.KQ": {
-      "ticker": "082920.KQ",
-      "name": "비츠로셀",
+    "100790.KQ": {
+      "ticker": "100790.KQ",
+      "name": "미래에셋벤처투자",
       "qty": 2,
-      "entry_price": 52700.0,
-      "target_price": 57711.77,
-      "stop_price": 49011.0,
+      "entry_price": 41900.0,
+      "target_price": 46940.57,
+      "stop_price": 38967.0,
       "entry_date": "2026-06-04",
+      "is_us": false
+    },
+    "047040.KS": {
+      "ticker": "047040.KS",
+      "name": "대우건설",
+      "qty": 7,
+      "entry_price": 21875.0,
+      "target_price": 23655.625,
+      "stop_price": 20343.75,
+      "entry_date": "2026-06-05",
+      "is_us": false
+    },
+    "047050.KS": {
+      "ticker": "047050.KS",
+      "name": "포스코인터내셔널",
+      "qty": 3,
+      "entry_price": 58400.0,
+      "target_price": 63778.64,
+      "stop_price": 54312.0,
+      "entry_date": "2026-06-05",
+      "is_us": false
+    },
+    "356860.KQ": {
+      "ticker": "356860.KQ",
+      "name": "티엘비",
+      "qty": 1,
+      "entry_price": 108900.0,
+      "target_price": 118210.95,
+      "stop_price": 101277.0,
+      "entry_date": "2026-06-05",
       "is_us": false
     }
   }

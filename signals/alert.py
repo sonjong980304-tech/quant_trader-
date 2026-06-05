@@ -4,8 +4,8 @@ from __future__ import annotations
 alert.py - 급등 신호 자동 매수 실행 + 텔레그램 알림
 
 흐름:
-  1. 켈리 공식으로 매수 수량 계산
-  2. qty == 0이면 스킵 알림만 전송
+  1. 켈리 공식으로 매수 수량 계산 (US 주식은 USD→KRW 환산 후 수량 계산)
+  2. qty == 0이면 주문가능금액으로 최대 매수 재시도
   3. qty > 0이면 KIS API로 즉시 매수 실행
   4. 결과를 텔레그램으로 전송
 """
@@ -16,6 +16,17 @@ from portfolio.kelly import kelly_fraction, position_size
 
 logger = logging.getLogger(__name__)
 
+_EXCHANGE_RATE = 1_400   # 원/달러 근사치 (통합증거금 기준)
+
+
+def _is_us(ticker: str) -> bool:
+    return not (ticker.endswith(".KS") or ticker.endswith(".KQ"))
+
+
+def _price_krw(price: float, ticker: str) -> float:
+    """US 주식 달러 가격을 원화 환산 (수량 계산용)."""
+    return price * _EXCHANGE_RATE if _is_us(ticker) else price
+
 
 def _execute_buy(signal: dict, growth_cash: float) -> tuple[int, float, str]:
     """
@@ -25,10 +36,25 @@ def _execute_buy(signal: dict, growth_cash: float) -> tuple[int, float, str]:
     """
     from config import KIS_APP_KEY
 
-    price = signal["current_price"]
-    qty, _, amount = position_size(
-        growth_cash, signal["win_prob"], signal["avg_win"], signal["avg_loss"], price
+    ticker    = signal["ticker"]
+    price     = signal["current_price"]
+    us        = _is_us(ticker)
+    price_for = _price_krw(price, ticker)   # 수량 계산용 원화 환산가
+
+    qty, _, _ = position_size(
+        growth_cash, signal["win_prob"], signal["avg_win"], signal["avg_loss"], price_for
     )
+
+    # 켈리 추천 0주 → 주문가능금액으로 최대 매수 재시도
+    if qty <= 0 and KIS_APP_KEY:
+        try:
+            from trader import KISTrader
+            avail = float(KISTrader().get_available_cash())
+            qty   = int(avail / price_for)
+            if qty > 0:
+                logger.info("[%s] 켈리 0주 → 주문가능금액으로 %d주 매수 시도", ticker, qty)
+        except Exception as e:
+            logger.warning("[%s] 주문가능금액 조회 실패: %s", ticker, e)
 
     if qty <= 0:
         return 0, price, "skip_qty"
@@ -36,14 +62,12 @@ def _execute_buy(signal: dict, growth_cash: float) -> tuple[int, float, str]:
     if not KIS_APP_KEY:
         return qty, price, "skip_no_key"
 
-    ticker   = signal["ticker"]
-    is_us    = not (ticker.endswith(".KS") or ticker.endswith(".KQ"))
-    code     = ticker.replace(".KS", "").replace(".KQ", "")
+    code = ticker.replace(".KS", "").replace(".KQ", "")
 
     try:
         from trader import KISTrader
         t = KISTrader()
-        if is_us:
+        if us:
             t.buy_us(code, qty)
         else:
             t.buy(code, qty)
@@ -63,6 +87,7 @@ def _execute_buy(signal: dict, growth_cash: float) -> tuple[int, float, str]:
 
         return qty, price, "ok"
     except Exception as e:
+        logger.error("[%s] 매수 실패: %s", ticker, e)
         return qty, price, f"error:{e}"
 
 
@@ -79,27 +104,43 @@ def send_signal_alert(signal: dict, growth_cash: float) -> dict:
     rr          = signal["risk_reward"]
     price       = signal["current_price"]
     triggers    = ", ".join(signal["triggers"])
+    us          = _is_us(ticker)
+    price_for   = _price_krw(price, ticker)
     agent_label = {"momentum": "돌파 에이전트", "reversion": "눌림목 에이전트"}.get(
         signal.get("agent", ""), "통합 에이전트"
     )
 
     kelly_f = kelly_fraction(signal["win_prob"], signal["avg_win"], signal["avg_loss"])
     qty, _, invest_amount = position_size(
-        growth_cash, signal["win_prob"], signal["avg_win"], signal["avg_loss"], price
+        growth_cash, signal["win_prob"], signal["avg_win"], signal["avg_loss"], price_for
     )
+
+    # 표시용 가격/금액 문자열
+    if us:
+        price_str  = f"${price:,.2f}"
+        invest_str = f"${invest_amount / _EXCHANGE_RATE:,.0f} (₩{invest_amount:,.0f})"
+    else:
+        price_str  = f"{price:,.0f}원"
+        invest_str = f"{invest_amount:,.0f}원"
 
     try:
         qty_executed, exec_price, status = _execute_buy(signal, growth_cash)
 
         if status == "skip_qty":
-            exec_line = "⚠️ 켈리 기준 0주 — 자금 부족 또는 조건 미달, 매수 생략"
+            exec_line = "⚠️ 켈리 기준 0주 — 1주 가격이 주문가능금액 초과, 매수 생략"
         elif status == "skip_no_key":
             exec_line = f"⚠️ KIS API 미연결 — 실제 매수 생략 (추천 {qty}주)"
         elif status == "ok":
-            exec_line = (
-                f"✅ <b>자동 매수 완료</b> {qty_executed}주 × {exec_price:,.0f}원 "
-                f"= {qty_executed * exec_price:,.0f}원"
-            )
+            if us:
+                exec_line = (
+                    f"✅ <b>자동 매수 완료</b> {qty_executed}주 × ${exec_price:,.2f} "
+                    f"= ${qty_executed * exec_price:,.0f}"
+                )
+            else:
+                exec_line = (
+                    f"✅ <b>자동 매수 완료</b> {qty_executed}주 × {exec_price:,.0f}원 "
+                    f"= {qty_executed * exec_price:,.0f}원"
+                )
         else:
             exec_line = f"❌ 매수 실패: {status.replace('error:', '')}"
 
@@ -108,13 +149,13 @@ def send_signal_alert(signal: dict, growth_cash: float) -> dict:
             f"━━━━━━━━━━━━━━━\n"
             f"🤖 에이전트: <b>{agent_label}</b>\n"
             f"📡 트리거: {triggers}\n"
-            f"💵 현재가: {price:,.0f}원\n\n"
+            f"💵 현재가: {price_str}\n\n"
             f"📊 <b>ML 예측 (7일 기준)</b>\n"
             f"  승률:        <b>{win_prob:.1f}%</b>\n"
             f"  예상 수익:   <b>+{avg_win:.1f}%</b>\n"
             f"  예상 손실:   <b>-{avg_loss:.1f}%</b>\n"
             f"  손익비:      <b>{rr:.2f}</b>\n\n"
-            f"💰 <b>켈리 추천</b> 비중 {kelly_f*100:.1f}% / {invest_amount:,.0f}원 / {qty}주\n\n"
+            f"💰 <b>켈리 추천</b> 비중 {kelly_f*100:.1f}% / {invest_str} / {qty}주\n\n"
             f"{exec_line}"
         )
         sent = send_telegram(msg)
