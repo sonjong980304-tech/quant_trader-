@@ -10,6 +10,7 @@ runner.py - ML 급등주 전략 스케줄러
 
 import schedule
 import time
+import threading
 import logging
 import logging.handlers
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -752,48 +753,102 @@ def execute_pending_orders(market: str):
     )
 
 
-def retrain_kr_models():
-    """매일 07:30 실행 — KRX 유니버스 ML 모델 재학습."""
+_retrain_retry_kr = None  # threading.Timer
+_retrain_retry_us = None  # threading.Timer
+_RETRAIN_RETRY_INTERVAL = 1800  # 30분
+
+
+def _needs_retry(results: dict) -> bool:
+    """전체 종목 중 절반 이상 실패(또는 0개)면 True."""
+    total = len(results)
+    if total == 0:
+        return True
+    fail = sum(1 for v in results.values() if not v)
+    return fail / total > 0.5
+
+
+def retrain_kr_models(_is_retry: bool = False):
+    """매일 07:30 실행 — KRX 유니버스 ML 모델 재학습. 절반 이상 실패 시 30분마다 재시도."""
+    global _retrain_retry_kr
     now = datetime.now(KST)
-    if not is_kr_trading_day(now.date()):
+    if not _is_retry and not is_kr_trading_day(now.date()):
         return
-    logger.info("KR ML 재학습 시작")
+    label = "재시도" if _is_retry else "시작"
+    logger.info("KR ML 재학습 %s", label)
     try:
         from ml.trainer import retrain_daily
         results = retrain_daily(market="kr")
         ok   = sum(1 for v in results.values() if v)
         fail = len(results) - ok
-        send_telegram(
-            f"🤖 <b>KR ML 모델 재학습 완료</b>\n"
-            f"성공: {ok}개 / 실패: {fail}개\n"
-            f"{now.strftime('%Y-%m-%d %H:%M')} 기준"
-        )
+
+        if _needs_retry(results):
+            logger.warning("KR ML 재학습 절반 이상 실패(%d/%d) → 30분 후 재시도", fail, len(results))
+            send_telegram(
+                f"⚠️ <b>KR ML 재학습 실패 과다</b> ({fail}/{len(results)})\n"
+                f"30분 후 자동 재시도합니다."
+            )
+            if _retrain_retry_kr:
+                _retrain_retry_kr.cancel()
+            _retrain_retry_kr = threading.Timer(
+                _RETRAIN_RETRY_INTERVAL, retrain_kr_models, kwargs={"_is_retry": True}
+            )
+            _retrain_retry_kr.daemon = True
+            _retrain_retry_kr.start()
+        else:
+            if _retrain_retry_kr:
+                _retrain_retry_kr.cancel()
+                _retrain_retry_kr = None
+            send_telegram(
+                f"🤖 <b>KR ML 모델 재학습 완료</b>\n"
+                f"성공: {ok}개 / 실패: {fail}개\n"
+                f"{now.strftime('%Y-%m-%d %H:%M')} 기준"
+            )
     except Exception as e:
         logger.error("KR ML 재학습 실패: %s", e)
         send_telegram(f"⚠️ KR ML 재학습 오류: {e}")
 
 
-def retrain_us_models():
+def retrain_us_models(_is_retry: bool = False):
     """미국 증시 시작 직후 실행 — US 유니버스 ML 모델 재학습.
     22:30(서머) / 23:30(동절기) 양쪽에 스케줄 등록 후
     ET 09:30~10:00 창에서만 실제 실행."""
+    global _retrain_retry_us
     import pytz
     eastern = pytz.timezone("America/New_York")
     now_et  = datetime.now(KST).astimezone(eastern)
     et_min  = now_et.hour * 60 + now_et.minute
-    if not (9 * 60 + 30 <= et_min <= 10 * 60):
+    if not _is_retry and not (9 * 60 + 30 <= et_min <= 10 * 60):
         return
-    logger.info("US ML 재학습 시작 (미국장 시작 직후)")
+    label = "재시도" if _is_retry else "시작"
+    logger.info("US ML 재학습 %s", label)
     try:
         from ml.trainer import retrain_daily
         results = retrain_daily(market="us")
         ok   = sum(1 for v in results.values() if v)
         fail = len(results) - ok
-        send_telegram(
-            f"🤖 <b>US ML 모델 재학습 완료</b>\n"
-            f"성공: {ok}개 / 실패: {fail}개\n"
-            f"{datetime.now(KST).strftime('%Y-%m-%d %H:%M')} 기준"
-        )
+
+        if _needs_retry(results):
+            logger.warning("US ML 재학습 절반 이상 실패(%d/%d) → 30분 후 재시도", fail, len(results))
+            send_telegram(
+                f"⚠️ <b>US ML 재학습 실패 과다</b> ({fail}/{len(results)})\n"
+                f"30분 후 자동 재시도합니다."
+            )
+            if _retrain_retry_us:
+                _retrain_retry_us.cancel()
+            _retrain_retry_us = threading.Timer(
+                _RETRAIN_RETRY_INTERVAL, retrain_us_models, kwargs={"_is_retry": True}
+            )
+            _retrain_retry_us.daemon = True
+            _retrain_retry_us.start()
+        else:
+            if _retrain_retry_us:
+                _retrain_retry_us.cancel()
+                _retrain_retry_us = None
+            send_telegram(
+                f"🤖 <b>US ML 모델 재학습 완료</b>\n"
+                f"성공: {ok}개 / 실패: {fail}개\n"
+                f"{datetime.now(KST).strftime('%Y-%m-%d %H:%M')} 기준"
+            )
     except Exception as e:
         logger.error("US ML 재학습 실패: %s", e)
         send_telegram(f"⚠️ US ML 재학습 오류: {e}")

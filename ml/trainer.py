@@ -64,20 +64,32 @@ def retrain_daily(market: str = "all") -> dict:
         try:
             from signals.krx_universe import get_krx_backtest_universe
             kr = get_krx_backtest_universe(top_n=200)
-            tickers_dict.update(kr)
-            logger.info("KRX 유니버스: %d개", len(kr))
+            if kr:
+                tickers_dict.update(kr)
+                logger.info("KRX 유니버스: %d개", len(kr))
+            else:
+                raise ValueError("KRX 유니버스 0개")
         except Exception as e:
-            logger.warning("KRX 유니버스 조회 실패: %s", e)
+            logger.warning("KRX 유니버스 조회 실패(%s) → config.STOCKS fallback", e)
+            from config import STOCKS
+            tickers_dict.update(STOCKS)
+            logger.info("KRX fallback: config.STOCKS %d개", len(STOCKS))
 
     if market in ("us", "all"):
         try:
             from signals.us_universe import get_us_backtest_universe
             us_before = len(tickers_dict)
             us = get_us_backtest_universe(top_n=100)
-            tickers_dict.update(us)
-            logger.info("US 유니버스: %d개", len(tickers_dict) - us_before)
+            if us:
+                tickers_dict.update(us)
+                logger.info("US 유니버스: %d개", len(tickers_dict) - us_before)
+            else:
+                raise ValueError("US 유니버스 0개")
         except Exception as e:
-            logger.warning("US 유니버스 조회 실패: %s", e)
+            logger.warning("US 유니버스 조회 실패(%s) → config.US_STOCKS fallback", e)
+            from config import US_STOCKS
+            tickers_dict.update(US_STOCKS)
+            logger.info("US fallback: config.US_STOCKS %d개", len(US_STOCKS))
 
     tickers = list(tickers_dict.keys())
     logger.info("재학습 시작: %d개 종목 (market=%s)", len(tickers), market)

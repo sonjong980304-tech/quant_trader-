@@ -4,85 +4,53 @@
   "activated_at": "2026-05-25T20:45:39.809999+09:00",
   "note": "legacy_tickers에 보유 중인 기존 2종목 코드가 자동 기록됩니다. 모두 매도 시 bot_active가 true로 전환됩니다.",
   "ml_positions": {
-    "039200.KQ": {
-      "ticker": "039200.KQ",
-      "name": "오스코텍",
-      "qty": 3,
-      "entry_price": 42200.0,
-      "target_price": 46993.92,
-      "stop_price": 39246.0,
-      "entry_date": "2026-05-29",
-      "is_us": false
-    },
-    "015760.KS": {
-      "ticker": "015760.KS",
-      "name": "한국전력",
-      "qty": 4,
-      "entry_price": 39550.0,
-      "target_price": 42662.585,
-      "stop_price": 36781.5,
-      "entry_date": "2026-05-29",
-      "is_us": false
-    },
-    "016360.KS": {
-      "ticker": "016360.KS",
-      "name": "삼성증권",
+    "005930.KS": {
+      "ticker": "005930.KS",
+      "name": "삼성전자",
       "qty": 1,
-      "entry_price": 129000.0,
-      "target_price": 138223.5,
-      "stop_price": 119970.0,
-      "entry_date": "2026-06-01",
-      "is_us": false
+      "entry_price": 318500.0,
+      "target_price": 344139.25,
+      "stop_price": 168071.7421,
+      "entry_date": "2026-06-09",
+      "is_us": false,
+      "atr": 75214.1289,
+      "highest_price": 318500.0
+    },
+    "095610.KQ": {
+      "ticker": "095610.KQ",
+      "name": "테스",
+      "qty": 1,
+      "entry_price": 156700.0,
+      "target_price": 173341.54,
+      "stop_price": 86671.4286,
+      "entry_date": "2026-06-09",
+      "is_us": false,
+      "atr": 35014.2857,
+      "highest_price": 156700.0
     },
     "100790.KQ": {
       "ticker": "100790.KQ",
       "name": "미래에셋벤처투자",
-      "qty": 2,
-      "entry_price": 41900.0,
-      "target_price": 46940.57,
-      "stop_price": 38967.0,
-      "entry_date": "2026-06-04",
-      "is_us": false
-    },
-    "047040.KS": {
-      "ticker": "047040.KS",
-      "name": "대우건설",
-      "qty": 7,
-      "entry_price": 21875.0,
-      "target_price": 23655.625,
-      "stop_price": 20343.75,
-      "entry_date": "2026-06-05",
-      "is_us": false
-    },
-    "047050.KS": {
-      "ticker": "047050.KS",
-      "name": "포스코인터내셔널",
-      "qty": 3,
-      "entry_price": 58400.0,
-      "target_price": 63778.64,
-      "stop_price": 54312.0,
-      "entry_date": "2026-06-05",
-      "is_us": false
-    },
-    "356860.KQ": {
-      "ticker": "356860.KQ",
-      "name": "티엘비",
       "qty": 1,
-      "entry_price": 108900.0,
-      "target_price": 118210.95,
-      "stop_price": 101277.0,
-      "entry_date": "2026-06-05",
-      "is_us": false
+      "entry_price": 42600.0,
+      "target_price": 47724.78,
+      "stop_price": -2014.2857,
+      "entry_date": "2026-06-09",
+      "is_us": false,
+      "atr": 22307.1429,
+      "highest_price": 42600.0
     },
-    "090360.KQ": {
-      "ticker": "090360.KQ",
-      "name": "로보스타",
+    "141080.KQ": {
+      "ticker": "141080.KQ",
+      "name": "리가켐바이오",
       "qty": 1,
-      "entry_price": 146700.0,
-      "target_price": 169570.53,
-      "stop_price": 136431.0,
-      "entry_date": "2026-06-05",
-      "is_us": false
+      "entry_price": 131500.0,
+      "target_price": 145794.05,
+      "stop_price": 98828.5714,
+      "entry_date": "2026-06-09",
+      "is_us": false,
+      "atr": 16335.7143,
+      "highest_price": 131500.0
     }
   }
 }
