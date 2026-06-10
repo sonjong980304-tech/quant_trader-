@@ -77,8 +77,19 @@ def write_stocks_to_config(stocks: dict):
 # /start
 # ─────────────────────────────────────────────
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    import json, os
+    state_path = os.path.join(os.path.dirname(__file__), "state.json")
+    try:
+        with open(state_path) as f:
+            state = json.load(f)
+        state["bot_active"] = True
+        with open(state_path, "w") as f:
+            json.dump(state, f, ensure_ascii=False, indent=2)
+        status = "▶️ 자동매매 <b>활성화</b>됐습니다."
+    except Exception:
+        status = ""
     msg = (
-        "📈 <b>퀀트 자동매매 봇</b>\n\n"
+        f"📈 <b>퀀트 자동매매 봇</b>\n{status}\n\n"
         "안녕하세요! 주식 관련 질문은 <b>그냥 말씀해주시면</b> 바로 답변드립니다 😊\n\n"
         "예) <i>\"삼성전자 PER 얼마야?\"</i>\n"
         "예) <i>\"매수 2원칙 조건이 뭐야?\"</i>\n"
