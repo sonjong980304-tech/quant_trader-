@@ -90,6 +90,29 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 # ─────────────────────────────────────────────
+# /stop — 자동매매 중단
+# ─────────────────────────────────────────────
+async def cmd_stop(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    import json, os
+    state_path = os.path.join(os.path.dirname(__file__), "state.json")
+    try:
+        with open(state_path) as f:
+            state = json.load(f)
+        if not state.get("bot_active", False):
+            await update.message.reply_text("⏸ 자동매매가 이미 중단된 상태입니다.")
+            return
+        state["bot_active"] = False
+        with open(state_path, "w") as f:
+            json.dump(state, f, ensure_ascii=False, indent=2)
+        await update.message.reply_text(
+            "⏹ <b>자동매매 중단됨</b>\n재시작하려면 /start 를 입력하세요.",
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ 중단 실패: {e}")
+
+
+# ─────────────────────────────────────────────
 # /status — 전 종목 신호 조회
 # ─────────────────────────────────────────────
 async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -958,6 +981,7 @@ def main():
 
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
     app.add_handler(CommandHandler("start",        cmd_start))
+    app.add_handler(CommandHandler("stop",         cmd_stop))
     app.add_handler(CommandHandler("status",       cmd_status))
     app.add_handler(CommandHandler("balance",      cmd_balance))
     app.add_handler(CommandHandler("run",          cmd_run))

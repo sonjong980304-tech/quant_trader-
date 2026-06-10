@@ -1,33 +1,9 @@
 {
-  "bot_active": true,
+  "bot_active": false,
   "legacy_tickers": [],
   "activated_at": "2026-05-25T20:45:39.809999+09:00",
   "note": "legacy_tickers에 보유 중인 기존 2종목 코드가 자동 기록됩니다. 모두 매도 시 bot_active가 true로 전환됩니다.",
   "ml_positions": {
-    "005930.KS": {
-      "ticker": "005930.KS",
-      "name": "삼성전자",
-      "qty": 1,
-      "entry_price": 318500.0,
-      "target_price": 344139.25,
-      "stop_price": 168071.7421,
-      "entry_date": "2026-06-09",
-      "is_us": false,
-      "atr": 75214.1289,
-      "highest_price": 318500.0
-    },
-    "095610.KQ": {
-      "ticker": "095610.KQ",
-      "name": "테스",
-      "qty": 1,
-      "entry_price": 156700.0,
-      "target_price": 173341.54,
-      "stop_price": 86671.4286,
-      "entry_date": "2026-06-09",
-      "is_us": false,
-      "atr": 35014.2857,
-      "highest_price": 156700.0
-    },
     "100790.KQ": {
       "ticker": "100790.KQ",
       "name": "미래에셋벤처투자",
@@ -38,19 +14,79 @@
       "entry_date": "2026-06-09",
       "is_us": false,
       "atr": 22307.1429,
-      "highest_price": 42600.0
+      "highest_price": 44200.0
     },
-    "141080.KQ": {
-      "ticker": "141080.KQ",
-      "name": "리가켐바이오",
+    "006800.KS": {
+      "ticker": "006800.KS",
+      "name": "미래에셋증권",
       "qty": 1,
-      "entry_price": 131500.0,
-      "target_price": 145794.05,
-      "stop_price": 98828.5714,
+      "entry_price": 51600.0,
+      "target_price": 57595.92,
+      "stop_price": 35742.8571,
       "entry_date": "2026-06-09",
       "is_us": false,
-      "atr": 16335.7143,
-      "highest_price": 131500.0
+      "atr": 7928.5714,
+      "highest_price": 51600.0
+    },
+    "001440.KS": {
+      "ticker": "001440.KS",
+      "name": "대한전선",
+      "qty": 1,
+      "entry_price": 38850.0,
+      "target_price": 41658.855,
+      "stop_price": -10357.1429,
+      "entry_date": "2026-06-09",
+      "is_us": false,
+      "atr": 24603.5714,
+      "highest_price": 38850.0
+    },
+    "178320.KQ": {
+      "ticker": "178320.KQ",
+      "name": "서진시스템",
+      "qty": 1,
+      "entry_price": 73700.0,
+      "target_price": 80141.38,
+      "stop_price": 53814.2857,
+      "entry_date": "2026-06-09",
+      "is_us": false,
+      "atr": 9942.8571,
+      "highest_price": 74600.0
+    },
+    "319400.KQ": {
+      "ticker": "319400.KQ",
+      "name": "현대무벡스",
+      "qty": 1,
+      "entry_price": 34550.0,
+      "target_price": 38505.975,
+      "stop_price": -25250.0,
+      "entry_date": "2026-06-09",
+      "is_us": false,
+      "atr": 29900.0,
+      "highest_price": 35150.0
+    },
+    "042700.KS": {
+      "ticker": "042700.KS",
+      "name": "한미반도체",
+      "qty": 1,
+      "entry_price": 268500.0,
+      "target_price": 306868.65,
+      "stop_price": 93642.8571,
+      "entry_date": "2026-06-10",
+      "is_us": false,
+      "atr": 87428.5714,
+      "highest_price": 268500.0
+    },
+    "240810.KQ": {
+      "ticker": "240810.KQ",
+      "name": "원익IPS",
+      "qty": 1,
+      "entry_price": 118800.0,
+      "target_price": 129967.2,
+      "stop_price": 31771.4286,
+      "entry_date": "2026-06-10",
+      "is_us": false,
+      "atr": 43514.2857,
+      "highest_price": 119400.0
     }
   }
 }
