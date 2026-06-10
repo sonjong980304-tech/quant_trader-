@@ -1,5 +1,5 @@
 {
-  "bot_active": false,
+  "bot_active": true,
   "legacy_tickers": [
     "001440",
     "006800",

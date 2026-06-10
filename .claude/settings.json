@@ -6,20 +6,14 @@
         "hooks": [
           {
             "type": "command",
-            "command": "jq -r '.tool_input.file_path // .tool_response.filePath // \"\"' | { read -r f; echo \"$f\" | grep -q '\\.py$' && launchctl unload ~/Library/LaunchAgents/com.quant.telegrambot.plist && launchctl load ~/Library/LaunchAgents/com.quant.telegrambot.plist && launchctl unload ~/Library/LaunchAgents/com.quant.trader.plist && launchctl load ~/Library/LaunchAgents/com.quant.trader.plist; } 2>/dev/null || true",
-            "statusMessage": "봇·스케줄러 재시작 중...",
-            "async": true
-          },
-          {
-            "type": "command",
-            "command": "jq -r '.tool_input.file_path // .tool_response.filePath // \"\"' | bash /Users/gyuyeong/quant_trader/.claude/git-autopush.sh",
+            "command": "bash /Users/gyuyeong/quant_trader/.claude/hook-push.sh",
             "statusMessage": "GitHub 자동 푸시 중...",
             "async": true
           },
           {
             "type": "command",
-            "command": "jq -r '.tool_input.file_path // .tool_response.filePath // \"\"' | bash /Users/gyuyeong/quant_trader/.claude/readme-update.sh",
-            "statusMessage": "README 자동 업데이트 중...",
+            "command": "bash /Users/gyuyeong/quant_trader/.claude/hook-restart.sh",
+            "statusMessage": "봇·스케줄러 재시작 중...",
             "async": true
           }
         ]
