@@ -1,0 +1,10 @@
+{
+  "snapshot_date": "2026-06-10",
+  "MIN_WIN_PROB": 0.55,
+  "MIN_RR": 1.5,
+  "regime_threshold": 0.5,
+  "TP_PCT": 0.15,
+  "SL_PCT": 0.06,
+  "HORIZON": 7,
+  "BACKTEST_EV": 0.01468
+}

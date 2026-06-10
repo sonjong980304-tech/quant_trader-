@@ -276,13 +276,30 @@ def send_daily_summary():
 # 봇 활성화 게이트
 # ─────────────────────────────────────────────
 
-def _run_paper_daily_report():
-    """18:00 페이퍼 트레이딩 일일 리포트."""
+def _run_paper_daily_report_kr():
+    """15:35 KR 페이퍼 트레이딩 일일 리포트 (한국 증시 마감 직후)."""
     try:
         from paper_trader import daily_report
-        daily_report()
+        daily_report(market="KR")
     except Exception as e:
-        logger.warning("[Paper] 일일 리포트 실패: %s", e)
+        logger.warning("[Paper] KR 일일 리포트 실패: %s", e)
+
+
+_us_report_sent_date = ""   # 중복 발송 방지 (서머타임·동절기 이중 등록 대응)
+
+
+def _run_paper_daily_report_us():
+    """05:30 / 06:30 US 페이퍼 트레이딩 일일 리포트 (미국 증시 마감 직후, 하루 1회)."""
+    global _us_report_sent_date
+    today = datetime.now().strftime("%Y-%m-%d")
+    if _us_report_sent_date == today:
+        return
+    _us_report_sent_date = today
+    try:
+        from paper_trader import daily_report
+        daily_report(market="US")
+    except Exception as e:
+        logger.warning("[Paper] US 일일 리포트 실패: %s", e)
 
 
 def _run_paper_weekly_summary():
@@ -1143,7 +1160,9 @@ def main():
     schedule.every().day.at("08:00").do(send_morning_briefing)
     schedule.every().day.at("09:00").do(lambda: execute_pending_orders("KR"))  # 한국장 시작
     schedule.every().day.at("15:00").do(send_daily_summary)
-    schedule.every().day.at("18:00").do(_run_paper_daily_report)
+    schedule.every().day.at("15:35").do(_run_paper_daily_report_kr)   # KR 마감 직후
+    schedule.every().day.at("05:30").do(_run_paper_daily_report_us)   # US 마감 직후 (서머타임)
+    schedule.every().day.at("06:30").do(_run_paper_daily_report_us)   # US 마감 직후 (동절기)
     schedule.every().sunday.at("20:00").do(_run_paper_weekly_summary)
     schedule.every().day.at("22:30").do(retrain_us_models)   # 서머타임 미국장 시작
     schedule.every().day.at("22:30").do(lambda: execute_pending_orders("US"))  # 서머타임 US 예약 주문
@@ -1164,7 +1183,7 @@ def main():
     )
 
     logger.info(
-        "등록 완료: 07:30 KR재학습 / 08:00 모닝브리핑 / 15:00 일일리포트 / "
+        "등록 완료: 07:30 KR재학습 / 08:00 모닝브리핑 / 15:00 일일리포트 / 15:35 KR페이퍼 / 05:30·06:30 US페이퍼 / "
         "22:30·23:30 US재학습 / 5분 ML스캔+포지션청산 / 매월 1일 08:30 리밸런싱"
     )
 

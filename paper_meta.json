@@ -1,0 +1,17 @@
+{
+  "logic_change_history": [
+    {
+      "date": "2026-06-10",
+      "reason": "B1: EOD 익일 시초가 진입 전략 교체 (slip 0.25%→0.05%)",
+      "prev_start_date": "없음",
+      "trades_archived": 0
+    },
+    {
+      "date": "2026-06-10",
+      "reason": "G1: SL -7%→-6%, TP 7%→15%, EOD 익일시초가 진입 — 2주 페이퍼 시작 2026-06-10",
+      "prev_start_date": "2026-06-10",
+      "trades_archived": 0
+    }
+  ],
+  "start_date": "2026-06-10"
+}

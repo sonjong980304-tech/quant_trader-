@@ -621,26 +621,46 @@ def _market_metrics_section(trades: list, m: dict, market: str, backtest_ev_val:
     return lines
 
 
-def daily_report() -> str:
-    """일일 페이퍼 트레이딩 리포트 생성 및 텔레그램 전송."""
+def daily_report(market: str | None = None) -> str:
+    """
+    일일 페이퍼 트레이딩 리포트 생성 및 텔레그램 전송.
+    market='KR' → KR 섹션만, 'US' → US 섹션만, None → KR+US 전체.
+    """
     trades    = _load(TRADES_PATH, [])
     positions = _load(POS_PATH, {})
     today     = _today_kst()
 
-    # 오늘 신호
-    today_signals = [t for t in trades if t["timestamp"].startswith(today)]
-    # 오늘 청산
-    today_closed  = [t for t in trades
+    # 오늘 신호 (market 필터 적용)
+    all_signals   = [t for t in trades if t["timestamp"].startswith(today)]
+    all_closed_td = [t for t in trades
                      if t["status"] == "closed" and
                      t.get("exit_timestamp", "").startswith(today)]
 
+    if market == "KR":
+        today_signals = [s for s in all_signals   if _is_kr(s["ticker"])]
+        today_closed  = [c for c in all_closed_td if _is_kr(c["ticker"])]
+        pos_filtered  = {k: v for k, v in positions.items() if _is_kr(v["ticker"])}
+        mkt_label     = "KR"
+    elif market == "US":
+        today_signals = [s for s in all_signals   if not _is_kr(s["ticker"])]
+        today_closed  = [c for c in all_closed_td if not _is_kr(c["ticker"])]
+        pos_filtered  = {k: v for k, v in positions.items() if not _is_kr(v["ticker"])}
+        mkt_label     = "US"
+    else:
+        today_signals = all_signals
+        today_closed  = all_closed_td
+        pos_filtered  = positions
+        mkt_label     = "KR+US"
+
     kr_sig = [s for s in today_signals if _is_kr(s["ticker"])]
     us_sig = [s for s in today_signals if not _is_kr(s["ticker"])]
+    sig_detail = (f"KR: {len(kr_sig)}건 / US: {len(us_sig)}건"
+                  if market is None else f"{market}: {len(today_signals)}건")
 
     lines = [
-        f"📋 <b>[페이퍼] 일일 리포트 {today}</b>",
+        f"📋 <b>[페이퍼/{mkt_label}] 일일 리포트 {today}</b>",
         "",
-        f"당일 신호: {len(today_signals)}건 (KR: {len(kr_sig)}건 / US: {len(us_sig)}건)",
+        f"당일 신호: {len(today_signals)}건 ({sig_detail})",
     ]
 
     if today_signals:
@@ -660,32 +680,35 @@ def daily_report() -> str:
         )
 
     # 미청산 포지션
-    lines.append(f"\n미청산 포지션: {len(positions)}건")
-    for pos in positions.values():
+    lines.append(f"\n미청산 포지션: {len(pos_filtered)}건")
+    for pos in pos_filtered.values():
         lines.append(
             f"  • {pos['name']}({pos['ticker']}) "
             f"{pos['trade_days']}일 경과"
         )
 
     # ── KR 섹션 ──────────────────────────────────────────────────────────────
-    m_kr = get_metrics(market="KR")
-    lines.extend(_market_metrics_section(trades, m_kr, "KR", BACKTEST_EV))
-
-    cb_kr, cb_kr_reason = check_circuit_breaker(market="KR")
-    if cb_kr:
-        lines += ["", f"🚨 <b>KR Circuit Breaker 발동</b>: {cb_kr_reason}"]
-    else:
-        lines.append("\n✅ KR Circuit Breaker: 정상")
+    if market in (None, "KR"):
+        m_kr = get_metrics(market="KR")
+        lines.extend(_market_metrics_section(trades, m_kr, "KR", BACKTEST_EV))
+        cb_kr, cb_kr_reason = check_circuit_breaker(market="KR")
+        if cb_kr:
+            lines += ["", f"🚨 <b>KR Circuit Breaker 발동</b>: {cb_kr_reason}"]
+        else:
+            lines.append("\n✅ KR Circuit Breaker: 정상")
 
     # ── US 섹션 ──────────────────────────────────────────────────────────────
-    m_us = get_metrics(market="US")
-    if m_us["n"] > 0:
-        lines.extend(_market_metrics_section(trades, m_us, "US", BACKTEST_EV_US))
-        cb_us, cb_us_reason = check_circuit_breaker(market="US")
-        if cb_us:
-            lines += ["", f"🚨 <b>US Circuit Breaker 발동</b>: {cb_us_reason}"]
-        else:
-            lines.append("\n✅ US Circuit Breaker: 정상")
+    if market in (None, "US"):
+        m_us = get_metrics(market="US")
+        if m_us["n"] > 0 or market == "US":
+            lines.extend(_market_metrics_section(trades, m_us, "US", BACKTEST_EV_US))
+            if market == "US":
+                lines.append("  (백테스트 기준 없음 — 탐색적 운용)")
+            cb_us, cb_us_reason = check_circuit_breaker(market="US")
+            if cb_us:
+                lines += ["", f"🚨 <b>US Circuit Breaker 발동</b>: {cb_us_reason}"]
+            else:
+                lines.append("\n✅ US Circuit Breaker: 정상")
 
     # V5: 파라미터 drift 체크
     drifts = check_param_drift()
@@ -709,7 +732,7 @@ def daily_report() -> str:
     except Exception as e:
         logger.warning("[Paper] 일일 리포트 전송 실패: %s", e)
 
-    logger.info("[Paper] 일일 리포트 완료 (%s)", today)
+    logger.info("[Paper] 일일 리포트 완료 (%s market=%s)", today, market or "ALL")
     return report
 
 
