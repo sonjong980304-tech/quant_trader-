@@ -22,7 +22,7 @@ import yfinance as yf
 
 from config import (
     STOCKS, US_STOCKS, MA_SHORT, MA_LONG, RSI_PERIOD, KIS_APP_KEY, GROWTH_ASSET_RATIO,
-    LIVE_TRADING,
+    LIVE_TRADING, SL_PCT,
 )
 from data_fetcher import fetch_ohlcv, get_minute_data
 from indicators import add_all_indicators, detect_crossover
@@ -417,9 +417,8 @@ def save_ml_position(ticker: str, name: str, qty: int, entry_price: float,
     state = _load_state()
     positions = state.setdefault("ml_positions", {})
     target_price = entry_price * (1 + avg_win)
-    # ATR 기반 손절: ATR이 가격의 10% 초과 시 데이터 이상으로 간주 → 6% 고정 폴백
-    # 정상 ATR이라도 stop은 최대 -6% 이하로 내려가지 않도록 캡
-    SL_PCT = 0.06
+    # ATR 기반 손절: ATR이 가격의 10% 초과 시 데이터 이상으로 간주 → SL_PCT 고정 폴백
+    # 정상 ATR이라도 stop은 최대 -SL_PCT 이하로 내려가지 않도록 캡
     if atr > 0 and (atr / entry_price) < 0.10:
         stop_price = max(entry_price - 2.0 * atr, entry_price * (1 - SL_PCT))
     else:

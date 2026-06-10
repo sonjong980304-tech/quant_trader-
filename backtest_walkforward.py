@@ -12,7 +12,7 @@ Walk-forward 구조:
   - 증권거래세: 0.18% (매도 시, KRX 한국 종목만)
 
 Triple-Barrier 청산:
-  - TP=+7%, SL=-7%, 최대 7거래일
+  - TP=+15%, SL=-6%, 최대 7거래일 (G1 그리드 채택, config 단일 진실 소스)
   - 당일 High/Low로 판정 (진입 다음날부터)
 
 게이트:
@@ -35,6 +35,13 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
+from config import (
+    ML_MIN_WIN_PROB    as MIN_WIN_PROB,
+    ML_MIN_RISK_REWARD as MIN_RR,
+    TP_PCT,
+    SL_PCT,
+)
+
 warnings.filterwarnings("ignore")
 logging.basicConfig(
     level=logging.INFO,
@@ -56,14 +63,10 @@ TRAIN_MONTHS   = 24        # 학습 창 (개월)
 TEST_MONTHS    = 3         # 테스트 창 (개월)
 STEP_MONTHS    = 3         # 슬라이딩 스텝 (개월)
 
-# 신호 필터
-MIN_WIN_PROB   = 0.60
-MIN_RR         = 1.5
+# 신호 필터 (MIN_WIN_PROB / MIN_RR / TP_PCT / SL_PCT → config 단일 진실 소스)
 MIN_AUC        = 0.58
 
 # Triple-Barrier
-TP_PCT         = 0.15
-SL_PCT         = 0.06
 HORIZON        = 7         # 최대 보유 거래일
 ATR_MULT       = 2.0       # ATR 기반 SL 승수 (2×ATR)
 

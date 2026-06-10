@@ -16,10 +16,9 @@ import numpy as np
 import pandas as pd
 import pytz
 
-logger = logging.getLogger(__name__)
+from config import ML_MIN_WIN_PROB as MIN_WIN_PROB, ML_MIN_RISK_REWARD as MIN_RISK_REWARD
 
-MIN_WIN_PROB    = 0.60   # 최소 승률 60%
-MIN_RISK_REWARD = 1.5    # 최소 기대값 손익비 (win_prob 가중 기대값 기준)
+logger = logging.getLogger(__name__)
 MIN_TRIGGERS    = 1      # 기술적 트리거 최소 1개 이상
 MIN_MODEL_AUC   = 0.58   # 최소 모델 예측력 (0.5 = 동전던지기, 0.58+ = 참고 가능)
 

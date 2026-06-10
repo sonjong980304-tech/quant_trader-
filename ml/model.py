@@ -17,16 +17,15 @@ from sklearn.model_selection import TimeSeriesSplit
 from sklearn.metrics import accuracy_score, roc_auc_score, brier_score_loss
 
 from ml.features import add_features, _triple_barrier_pnl, FEATURE_COLS
+from config import TP_PCT, SL_PCT
 
 logger = logging.getLogger(__name__)
 
 MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
 os.makedirs(MODEL_DIR, exist_ok=True)
 
-HORIZON    = 7      # 최대 보유 거래일 수
-TP_PCT     = 0.15   # 익절 기준 +15%
-SL_PCT     = 0.06   # 손절 기준 -6%
-N_SPLITS   = 5      # TimeSeriesSplit fold 수
+HORIZON    = 7   # 최대 보유 거래일 수 (config.EOD_HORIZON과 동일)
+N_SPLITS   = 5   # TimeSeriesSplit fold 수
 
 
 def _model_path(ticker: str, agent: str = "") -> str:
