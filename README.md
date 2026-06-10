@@ -81,19 +81,32 @@
   └── 양쪽 모두 발생 → 두 예측 중 win_prob 최고값 선택
 ```
 
-**XGBoost 피처 (15종)**
+**XGBoost 피처 (16종)**
 
-`change_rate`, `volume_change`, `rsi`, `ema_deviation_20`, `bb_width_20`, `bb_pct_20`, `bb_std_20`, `volume_ratio`, `candle_body`, `candle_upper_wick`, `candle_lower_wick`, `ret_3d`, `ret_5d`, `ret_10d`, `volatility_10d`
+`change_rate`, `volume_change`, `rsi`, `ema_deviation_20`, `bb_width_20`, `bb_pct_20`, `bb_std_20`, `volume_ratio`, `candle_body`, `candle_upper_wick`, `candle_lower_wick`, `ret_3d`, `ret_5d`, `ret_10d`, `volatility_10d`, `atr_pct`
+
+> `atr_pct` = ATR(14) / Close — 가격 정규화 변동성 피처. 종목별 변동성 구간을 모델이 직접 학습.
+
+**라벨링**: Triple-Barrier (López de Prado 방식)
+
+| 배리어 | 조건 | 결과 |
+|--------|------|------|
+| 상단 TP | 장중 High ≥ 진입가 × 1.07 | label=1 (성공) |
+| 하단 SL | 장중 Low ≤ 진입가 × 0.93 | label=0 (실패) |
+| 시간 | 7거래일 경과 후 종가 기준 | 종가 ≥ 진입가 → 1, 미만 → 0 |
+
+> 같은 날 TP·SL 동시 터치 → SL 우선 (보수적 가정). `make_target()`(종가 기반 +3%) 대비 실제 청산 로직과 일치.
 
 **학습 데이터**: 5년치 일봉 / 매일 07:30 KRX 200 + US 100 유니버스 종목 병렬 재학습 (momentum·reversion 에이전트 각각)
 
-**신호 확정 조건 (5중 필터)**
+**신호 확정 조건 (6중 필터)**
 
 | 필터 | 기준 | 설명 |
 |------|------|------|
 | 시장 상황 | KOSPI MA5 > MA20 | 역배열(하락장) 시 신규 매수 전면 차단 |
+| MA200 추세 | 종가 ≥ 200일 이동평균 | 하락 추세 종목 매수 신호 차단 (Phase 4) |
 | 모델 AUC | ≥ 0.58 | OOF AUC 0.5 = 동전던지기, 0.58 이상만 신뢰 |
-| 승률 | ≥ 60% | Platt Scaling 캘리브레이션 적용 후 7일 내 +3% 달성 확률 |
+| 승률 | ≥ 60% | Platt Scaling 캘리브레이션 적용 후 Triple-Barrier 달성 확률 |
 | 기대값 손익비 | ≥ 1.5 | `(avg_win_eff × win_prob) / (avg_loss × (1−win_prob))` — 약세장 시 avg_win × 0.4 적용 |
 | 트리거 수 | 1개 이상 | AUC·승률 기준이 주 필터, 트리거는 진입 조건 |
 
@@ -255,13 +268,14 @@ for _ in range(100_000):
 
 즉, 성장률을 25% 포기하는 대신 드로다운 위험을 25% 줄이는 거래입니다. ML 모델의 추정 오차가 필연적으로 존재하는 환경에서 이 완충은 전략 지속성을 유지하는 데 중요합니다.
 
-실제 적용에는 최대 25% 한도도 추가로 적용됩니다(`min(f_half, 0.25)`).
+실제 적용에는 최대 **20% 한도**도 추가로 적용됩니다(`min(f_half, 0.20)`).
 
 ```python
 # kelly.py
+MAX_KELLY = 0.20                 # 단일 포지션 최대 20% 캡
 f_full = (win_prob * b - q) / b  # 풀켈리
 f_half = f_full * 0.5            # 하프켈리 적용
-return round(max(0.0, f_half), 4)
+return round(min(MAX_KELLY, max(0.0, f_half)), 4)
 ```
 
 ---
@@ -293,6 +307,15 @@ state.json: {"bot_active": true, ...}  →  자동매매 시작
 ```
 
 텔레그램 LLM 기능(질문, 브리핑 등)은 봇 활성화 여부와 무관하게 항상 작동합니다.
+
+**텔레그램 제어**
+
+| 명령 | 동작 |
+|------|------|
+| `/stop` | 자동매매 중단 (`user_stopped=true` 플래그 설정 — 봇 재시작 후에도 유지) |
+| `/start` | 자동매매 재개 (`user_stopped=false` 해제) |
+
+> `/stop` 후 `.py` 파일 수정으로 봇이 재시작되어도 `user_stopped` 플래그가 자동 재활성화를 차단합니다.
 
 ---
 
@@ -436,6 +459,9 @@ quant_trader/
 ├── trader.py               # KIS API (국내 + 미국주식)
 ├── trade_logger.py         # 매매 이력 CSV 기록 + 텔레그램 전송
 ├── backtest_ml.py          # 45일 분봉 ML 백테스트
+├── backtest_walkforward.py # Walk-forward 백테스트 (비용 반영, 실거래 게이트)
+├── tests/
+│   └── test_triple_barrier.py  # Triple-Barrier 라벨링 단위 테스트 (10케이스)
 ├── morning_briefer.py      # 모닝 브리핑
 ├── data_fetcher.py         # yfinance 일봉 + KIS 분봉
 ├── indicators.py           # MA / RSI / 볼린저밴드
@@ -450,7 +476,7 @@ quant_trader/
 ├── state.json              # 봇 활성화 게이트
 ├── trade_history.csv       # 매매 이력
 ├── ml/
-│   ├── features.py         # 피처 엔지니어링 (15종) + 에이전트 트리거 필터
+│   ├── features.py         # 피처 엔지니어링 (16종, atr_pct 포함) + Triple-Barrier 라벨링 + 에이전트 트리거 필터
 │   ├── model.py            # XGBoost 학습·예측 (agent="" | "momentum" | "reversion")
 │   ├── trainer.py          # KRX+US 유니버스 병렬 재학습 (8스레드, 5년치, 에이전트별)
 │   └── models/             # {ticker}_momentum.pkl / {ticker}_reversion.pkl
@@ -468,6 +494,44 @@ quant_trader/
 ├── com.quant.trader.plist
 ├── com.quant.telegrambot.plist
 └── com.quant.dashboard.plist
+```
+
+---
+
+## Walk-forward 백테스트 (비용 반영)
+
+`backtest_walkforward.py` — 실투자 전 게이트 검증용. 비용 차감 후 기대값이 양수일 때만 실거래 재개.
+
+**구조**: 2년 학습 창 / 3개월 테스트 창 / 3개월 슬라이딩
+
+**비용 모델 (왕복)**
+
+| 항목 | 비율 |
+|------|------|
+| 수수료 (매수+매도) | 0.03% |
+| 슬리피지 | 0.25% |
+| 증권거래세 (KRX만) | 0.18% |
+| **KRX 총 비용** | **0.46%** |
+
+**Phase 4 결과** (50종목, 2021~2026)
+
+| 항목 | Phase 3 (이전) | Phase 4 (현재) |
+|------|--------------|--------------|
+| 총 거래 | 144건 | 139건 |
+| 승률 | 52.8% | **57.6%** |
+| 세후 평균 | +0.340% | **+1.019%** |
+| 기대값 | +0.0034 | **+0.0102** |
+
+> MA200 추세 필터로 하락 추세 신호를 제거해 승률 +4.8%p, 기대값 3배 개선.
+
+```bash
+python3 backtest_walkforward.py
+```
+
+출력 예시:
+```
+✅ 게이트 통과 — 실거래 재개 가능
+❌ 게이트 미통과 — 비용 차감 후 엣지 없음. 실거래 재개 불가
 ```
 
 ---

@@ -197,6 +197,14 @@ def _eval_agent(df: pd.DataFrame, ticker: str, agent: str, is_bear: bool = False
             "avg_win_effective": effective_avg_win}
 
 
+def _is_uptrend(df: pd.DataFrame) -> bool:
+    """MA200 추세 필터: 종가가 200일 이동평균 위에 있으면 True."""
+    if len(df) < 200:
+        return True  # 데이터 부족 시 필터 비활성화
+    ma200 = df["Close"].rolling(200).mean().iloc[-1]
+    return float(df["Close"].iloc[-1]) >= float(ma200)
+
+
 def scan_ticker(ticker: str, df: pd.DataFrame, is_bear: bool = False) -> dict | None:
     """
     단일 종목에 대해 트리거 → 에이전트 분기 → 최종 에이전트 결합 → 신호 판단.
@@ -208,6 +216,11 @@ def scan_ticker(ticker: str, df: pd.DataFrame, is_bear: bool = False) -> dict | 
     """
     if df.index.duplicated().any():
         df = df[~df.index.duplicated(keep="last")].sort_index()
+
+    # MA200 추세 필터: 하락 추세에서 매수 신호 차단
+    if not _is_uptrend(df):
+        logger.debug("  [%s] MA200 하락 추세 — 패스", ticker)
+        return None
 
     triggers = detect_triggers(df)
     if not triggers:

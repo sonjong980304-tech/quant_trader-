@@ -11,6 +11,9 @@ kelly.py - 하프켈리 기반 포지션 사이징 (급등주 30% 자산 대상)
 """
 
 
+MAX_KELLY = 0.20   # 단일 포지션 최대 20% 캡 (Phase 4)
+
+
 def kelly_fraction(win_prob: float, avg_win: float, avg_loss: float) -> float:
     """
     하프켈리 비율 계산.
@@ -19,7 +22,7 @@ def kelly_fraction(win_prob: float, avg_win: float, avg_loss: float) -> float:
     avg_win  : 성공 시 평균 수익률 (예: 0.072 → 7.2%)
     avg_loss : 실패 시 평균 손실률, 양수로 전달 (예: 0.038 → 3.8%)
 
-    반환: 투입 비율 (풀켈리 × 0.5, 음수면 0)
+    반환: 투입 비율 (풀켈리 × 0.5, 최대 MAX_KELLY 캡)
     """
     if avg_loss <= 0 or win_prob <= 0 or win_prob >= 1:
         return 0.0
@@ -29,7 +32,7 @@ def kelly_fraction(win_prob: float, avg_win: float, avg_loss: float) -> float:
     f_full = (win_prob * b - q) / b  # 풀켈리
     f_half = f_full * 0.5            # 하프켈리
 
-    return round(max(0.0, f_half), 4)
+    return round(min(MAX_KELLY, max(0.0, f_half)), 4)
 
 
 def position_size(

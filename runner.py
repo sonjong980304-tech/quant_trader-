@@ -327,6 +327,10 @@ def _check_activation():
     if state.get("bot_active"):
         return True
 
+    # /stop 명령으로 명시적 중단된 경우 자동 재활성화 금지
+    if state.get("user_stopped"):
+        return False
+
     legacy = state.get("legacy_tickers", [])
     if not legacy:
         # legacy_tickers 없음 = 처음부터 빈 계좌 → 바로 활성화
@@ -377,11 +381,13 @@ def save_ml_position(ticker: str, name: str, qty: int, entry_price: float,
     state = _load_state()
     positions = state.setdefault("ml_positions", {})
     target_price = entry_price * (1 + avg_win)
-    # ATR 기반 손절 (atr=0이면 기존 -7% 폴백)
-    if atr > 0:
-        stop_price = entry_price - 2.0 * atr
+    # ATR 기반 손절: ATR이 가격의 10% 초과 시 데이터 이상으로 간주 → 7% 고정 폴백
+    # 정상 ATR이라도 stop은 최대 -7% 이하로 내려가지 않도록 캡
+    SL_PCT = 0.07
+    if atr > 0 and (atr / entry_price) < 0.10:
+        stop_price = max(entry_price - 2.0 * atr, entry_price * (1 - SL_PCT))
     else:
-        stop_price = entry_price * 0.93
+        stop_price = entry_price * (1 - SL_PCT)
     positions[ticker] = {
         "ticker":        ticker,
         "name":          name,

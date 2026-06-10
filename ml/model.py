@@ -14,17 +14,18 @@ import logging
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import TimeSeriesSplit
-from sklearn.metrics import accuracy_score, roc_auc_score
+from sklearn.metrics import accuracy_score, roc_auc_score, brier_score_loss
 
-from ml.features import add_features, make_target, FEATURE_COLS
+from ml.features import add_features, _triple_barrier_pnl, FEATURE_COLS
 
 logger = logging.getLogger(__name__)
 
 MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
 os.makedirs(MODEL_DIR, exist_ok=True)
 
-HORIZON    = 7      # 예측 기간 (일)
-THRESHOLD  = 0.03   # 성공 기준 수익률 (3%)
+HORIZON    = 7      # 최대 보유 거래일 수
+TP_PCT     = 0.07   # 익절 기준 +7%
+SL_PCT     = 0.07   # 손절 기준 -7%
 N_SPLITS   = 5      # TimeSeriesSplit fold 수
 
 
@@ -50,13 +51,15 @@ def train(df: pd.DataFrame, ticker: str, agent: str = "") -> tuple[object, dict]
         raise ImportError("xgboost가 설치되어 있지 않습니다. pip install xgboost")
 
     df = add_features(df)
-    labels, future_returns = make_target(df, horizon=HORIZON, threshold=THRESHOLD)
+    labels, future_returns = _triple_barrier_pnl(
+        df, tp_pct=TP_PCT, sl_pct=SL_PCT, max_holding_days=HORIZON
+    )
 
     df = df.copy()
     df["_label"]         = labels
     df["_future_return"] = future_returns
     df = df.dropna(subset=FEATURE_COLS + ["_label", "_future_return"])
-    df = df.iloc[:-HORIZON]   # 미래 데이터 없는 마지막 N행 제거
+    df = df.iloc[:-HORIZON]   # 미래 데이터 부족한 마지막 N행 제거
 
     # 에이전트별 트리거 조건 필터링
     if agent == "momentum":
@@ -131,11 +134,21 @@ def train(df: pd.DataFrame, ticker: str, agent: str = "") -> tuple[object, dict]
     # Platt Scaling 캘리브레이션 — 마지막 fold 검증 데이터 사용 (시계열 순서 보존)
     from sklearn.calibration import CalibratedClassifierCV
     from sklearn.frozen import FrozenEstimator
+    brier_raw = np.nan
+    brier_cal = np.nan
     if last_val_idx is not None and len(last_val_idx) >= 20:
+        X_val_last = X[last_val_idx]
+        y_val_last = y[last_val_idx]
+        proba_raw  = final_model.predict_proba(X_val_last)[:, 1]
+        brier_raw  = float(brier_score_loss(y_val_last, proba_raw))
+
         calibrated_model = CalibratedClassifierCV(
             FrozenEstimator(final_model), method="sigmoid"
         )
-        calibrated_model.fit(X[last_val_idx], y[last_val_idx])
+        calibrated_model.fit(X_val_last, y_val_last)
+
+        proba_cal = calibrated_model.predict_proba(X_val_last)[:, 1]
+        brier_cal = float(brier_score_loss(y_val_last, proba_cal))
     else:
         calibrated_model = final_model
 
@@ -159,17 +172,22 @@ def train(df: pd.DataFrame, ticker: str, agent: str = "") -> tuple[object, dict]
         "avg_loss":      round(avg_loss, 4),
         "n_samples":     len(X),
         "positive_rate": round(float(y.mean()), 4),
-        "threshold":     THRESHOLD,
+        "tp_pct":        TP_PCT,
+        "sl_pct":        SL_PCT,
         "horizon":       HORIZON,
+        "brier_raw":     round(brier_raw, 4) if not np.isnan(brier_raw) else None,
+        "brier_cal":     round(brier_cal, 4) if not np.isnan(brier_cal) else None,
     }
 
     path = _model_path(ticker, agent)
     with open(path, "wb") as f:
         pickle.dump({"model": calibrated_model, "metrics": metrics}, f)
 
-    agent_label = f"[{agent}] " if agent else ""
-    logger.info("[%s] %s모델 저장 완료 | acc=%.3f auc=%.3f avg_win=%.1f%% avg_loss=%.1f%%",
-                ticker, agent_label, acc, auc, avg_win * 100, avg_loss * 100)
+    agent_label  = f"[{agent}] " if agent else ""
+    brier_log    = (f" brier_raw={brier_raw:.4f}→cal={brier_cal:.4f}"
+                    if not np.isnan(brier_raw) else "")
+    logger.info("[%s] %s모델 저장 완료 | acc=%.3f auc=%.3f avg_win=%.1f%% avg_loss=%.1f%%%s",
+                ticker, agent_label, acc, auc, avg_win * 100, avg_loss * 100, brier_log)
     return final_model, metrics
 
 

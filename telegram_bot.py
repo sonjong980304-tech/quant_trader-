@@ -83,6 +83,7 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         with open(state_path) as f:
             state = json.load(f)
         state["bot_active"] = True
+        state["user_stopped"] = False   # /stop 플래그 해제
         with open(state_path, "w") as f:
             json.dump(state, f, ensure_ascii=False, indent=2)
         status = "▶️ 자동매매 <b>활성화</b>됐습니다."
@@ -113,6 +114,7 @@ async def cmd_stop(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("⏸ 자동매매가 이미 중단된 상태입니다.")
             return
         state["bot_active"] = False
+        state["user_stopped"] = True    # 봇 재시작 시 자동 재활성화 방지
         with open(state_path, "w") as f:
             json.dump(state, f, ensure_ascii=False, indent=2)
         await update.message.reply_text(

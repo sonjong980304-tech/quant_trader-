@@ -92,6 +92,19 @@ def add_features(
     # ── 변동성 ───────────────────────────────────────
     df["volatility_10d"] = df["change_rate"].rolling(10).std()
 
+    # ── ATR (14일) ────────────────────────────────────
+    prev_close    = df["Close"].shift(1)
+    tr            = pd.concat([
+        df["High"] - df["Low"],
+        (df["High"] - prev_close).abs(),
+        (df["Low"]  - prev_close).abs(),
+    ], axis=1).max(axis=1)
+    df["atr_14"]  = tr.rolling(14).mean()
+    df["atr_pct"] = df["atr_14"] / df["Close"].replace(0, np.nan)  # 가격 정규화
+
+    # ── MA200 (추세 필터용, 피처 아님) ───────────────────
+    df["ma200"] = df["Close"].rolling(200).mean()
+
     # inf 값은 dropna로 걸러지지 않으므로 NaN으로 치환
     df.replace([np.inf, -np.inf], np.nan, inplace=True)
 
@@ -115,6 +128,7 @@ FEATURE_COLS = [
     "ret_5d",
     "ret_10d",
     "volatility_10d",
+    "atr_pct",             # Phase 4: ATR 정규화 (변동성 인식)
 ]
 
 
@@ -157,11 +171,133 @@ def make_target(
     threshold: float = 0.03,
 ) -> tuple[pd.Series, pd.Series]:
     """
-    7일 후 수익률 기반 이진 분류 타겟 생성.
-
-    threshold : 이 수익률 이상이면 성공(1), 미만이면 실패(0)
-    반환: (labels, future_returns)
+    [레거시] 7일 후 종가 수익률 기반 이진 분류 타겟.
+    신규 학습은 triple_barrier_label() 사용 권장.
     """
     future_return = df["Close"].shift(-horizon) / df["Close"] - 1
     labels        = (future_return >= threshold).astype(int)
     return labels, future_return
+
+
+def triple_barrier_label(
+    df: pd.DataFrame,
+    tp_pct: float,
+    sl_pct: float,
+    max_holding_days: int = 7,
+    use_intraday: bool = True,
+) -> pd.Series:
+    """
+    López de Prado식 Triple-Barrier 라벨링.
+
+    배리어:
+      상단(TP): entry_price * (1 + tp_pct)  → 먼저 도달 시 label=1
+      하단(SL): entry_price * (1 - sl_pct)  → 먼저 도달 시 label=0
+      시간(vertical): max_holding_days 경과 후 종가 ≥ 진입가 → 1, 아니면 0
+
+    NOTE: 같은 날 TP·SL 동시 터치 → SL 우선.
+          실거래에서 최악의 경우를 가정해 라벨 낙관 편향을 방지.
+
+    Args:
+        df               : OHLCV 데이터프레임 (거래일 인덱스)
+        tp_pct           : 익절 기준 (예: 0.07 → +7%)
+        sl_pct           : 손절 기준, 양수 전달 (예: 0.07 → -7%)
+        max_holding_days : 최대 보유 거래일 수
+        use_intraday     : True → 장중 High/Low로 판정 (기본값)
+                           False → 종가만 사용 (단위 테스트 비교용)
+
+    Returns:
+        pd.Series: index=진입 시점, value ∈ {0, 1}, 마지막 horizon행은 NaN
+    """
+    close = df["Close"].squeeze().values.astype(float)
+    high  = df["High"].squeeze().values.astype(float) if use_intraday else close
+    low   = df["Low"].squeeze().values.astype(float)  if use_intraday else close
+    n     = len(df)
+
+    labels = np.full(n, np.nan)
+
+    for i in range(n):
+        entry = close[i]
+        if entry <= 0 or np.isnan(entry):
+            continue
+        tp_price = entry * (1.0 + tp_pct)
+        sl_price = entry * (1.0 - sl_pct)
+
+        label       = np.nan
+        horizon_end = min(i + max_holding_days + 1, n)
+
+        for j in range(i + 1, horizon_end):
+            hit_sl = low[j]  <= sl_price
+            hit_tp = high[j] >= tp_price
+            # 같은 날 동시 터치 → SL 우선 (보수적 가정)
+            if hit_sl:
+                label = 0.0
+                break
+            if hit_tp:
+                label = 1.0
+                break
+
+        # 시간 배리어: 만료 시점 종가 기준
+        if np.isnan(label):
+            final_idx = min(i + max_holding_days, n - 1)
+            label = 1.0 if close[final_idx] >= entry else 0.0
+
+        labels[i] = label
+
+    return pd.Series(labels, index=df.index, dtype="float64")
+
+
+def _triple_barrier_pnl(
+    df: pd.DataFrame,
+    tp_pct: float,
+    sl_pct: float,
+    max_holding_days: int = 7,
+) -> tuple[pd.Series, pd.Series]:
+    """
+    Triple-Barrier 라벨 + 실제 손익률 동시 반환 (model.py 내부용).
+
+    손익률:
+      TP 도달  → +tp_pct
+      SL 도달  → -sl_pct
+      시간 만료 → 실제 종가 수익률
+    """
+    close = df["Close"].squeeze().values.astype(float)
+    high  = df["High"].squeeze().values.astype(float)
+    low   = df["Low"].squeeze().values.astype(float)
+    n     = len(df)
+
+    labels  = np.full(n, np.nan)
+    returns = np.full(n, np.nan)
+
+    for i in range(n):
+        entry = close[i]
+        if entry <= 0 or np.isnan(entry):
+            continue
+        tp_price = entry * (1.0 + tp_pct)
+        sl_price = entry * (1.0 - sl_pct)
+
+        label       = np.nan
+        pnl         = np.nan
+        horizon_end = min(i + max_holding_days + 1, n)
+
+        for j in range(i + 1, horizon_end):
+            if low[j] <= sl_price:
+                label = 0.0
+                pnl   = -sl_pct
+                break
+            if high[j] >= tp_price:
+                label = 1.0
+                pnl   = tp_pct
+                break
+
+        if np.isnan(label):
+            final_idx = min(i + max_holding_days, n - 1)
+            pnl   = (close[final_idx] - entry) / entry
+            label = 1.0 if pnl >= 0.0 else 0.0
+
+        labels[i]  = label
+        returns[i] = pnl
+
+    return (
+        pd.Series(labels,  index=df.index, dtype="float64"),
+        pd.Series(returns, index=df.index, dtype="float64"),
+    )
