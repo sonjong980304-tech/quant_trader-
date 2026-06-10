@@ -36,11 +36,16 @@ def _write(orders: list[dict]):
 
 
 def add_pending_order(action: str, ticker: str, code: str, qty: int,
-                      is_us: bool, note: str = "") -> str:
-    """예약 주문 추가. order_id 반환."""
+                      is_us: bool, note: str = "",
+                      ml_meta: dict | None = None) -> str:
+    """예약 주문 추가. order_id 반환.
+
+    ml_meta: ML 신호 메타데이터 (avg_win, avg_loss, atr 등).
+             execute_pending_orders 실행 후 save_ml_position 호출에 사용.
+    """
     orders = _read()
     order_id = str(uuid.uuid4())[:8]
-    orders.append({
+    entry: dict = {
         "id":       order_id,
         "action":   action.upper(),   # "BUY" or "SELL"
         "ticker":   ticker,
@@ -50,7 +55,10 @@ def add_pending_order(action: str, ticker: str, code: str, qty: int,
         "market":   "US" if is_us else "KR",
         "added_at": datetime.now(KST).strftime("%Y-%m-%d %H:%M"),
         "note":     note,
-    })
+    }
+    if ml_meta:
+        entry["ml_meta"] = ml_meta
+    orders.append(entry)
     _write(orders)
     logger.info("[PendingOrder] 등록: %s %s %s %d주", order_id, action, ticker, qty)
     return order_id

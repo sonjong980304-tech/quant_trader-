@@ -251,6 +251,7 @@ def _triple_barrier_pnl(
     tp_pct: float,
     sl_pct: float,
     max_holding_days: int = 7,
+    cost_pct: float = 0.0046,
 ) -> tuple[pd.Series, pd.Series]:
     """
     Triple-Barrier 라벨 + 실제 손익률 동시 반환 (model.py 내부용).
@@ -259,6 +260,10 @@ def _triple_barrier_pnl(
       TP 도달  → +tp_pct
       SL 도달  → -sl_pct
       시간 만료 → 실제 종가 수익률
+
+    cost_pct: 왕복 비용 (수수료 0.03% + 슬리피지 0.25% + 증권거래세 0.18% = 0.46%).
+              수직 배리어 label 기준: pnl >= cost_pct 이어야 win(1).
+              TP/SL 배리어는 가격 경계로 판정하므로 cost는 label이 아닌 net_pnl에만 반영.
     """
     close = df["Close"].squeeze().values.astype(float)
     high  = df["High"].squeeze().values.astype(float)
@@ -292,7 +297,8 @@ def _triple_barrier_pnl(
         if np.isnan(label):
             final_idx = min(i + max_holding_days, n - 1)
             pnl   = (close[final_idx] - entry) / entry
-            label = 1.0 if pnl >= 0.0 else 0.0
+            # 비용 차감 후 양수여야 win — 0.0 기준은 비용 편향을 유발
+            label = 1.0 if pnl >= cost_pct else 0.0
 
         labels[i]  = label
         returns[i] = pnl

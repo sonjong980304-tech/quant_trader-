@@ -4,30 +4,6 @@
   "activated_at": "2026-06-10T10:21:01.596690+09:00",
   "note": "legacy_tickers에 보유 중인 기존 2종목 코드가 자동 기록됩니다. 모두 매도 시 bot_active가 true로 전환됩니다.",
   "ml_positions": {
-    "006800.KS": {
-      "ticker": "006800.KS",
-      "name": "미래에셋증권",
-      "qty": 1,
-      "entry_price": 51600.0,
-      "target_price": 57595.92,
-      "stop_price": 47988.0,
-      "entry_date": "2026-06-09",
-      "is_us": false,
-      "atr": 7928.5714,
-      "highest_price": 51900.0
-    },
-    "319400.KQ": {
-      "ticker": "319400.KQ",
-      "name": "현대무벡스",
-      "qty": 1,
-      "entry_price": 34550.0,
-      "target_price": 38505.975,
-      "stop_price": 32131.5,
-      "entry_date": "2026-06-09",
-      "is_us": false,
-      "atr": 29900.0,
-      "highest_price": 36850.0
-    },
     "005930.KS": {
       "ticker": "005930.KS",
       "name": "삼성전자",
@@ -39,66 +15,6 @@
       "is_us": false,
       "atr": 172892.8571,
       "highest_price": 312000.0
-    },
-    "047040.KS": {
-      "ticker": "047040.KS",
-      "name": "대우건설",
-      "qty": 1,
-      "entry_price": 20400.0,
-      "target_price": 22060.56,
-      "stop_price": 18972.0,
-      "entry_date": "2026-06-10",
-      "is_us": false,
-      "atr": 86089.2857,
-      "highest_price": 21350.0
-    },
-    "032820.KQ": {
-      "ticker": "032820.KQ",
-      "name": "우리기술",
-      "qty": 5,
-      "entry_price": 13520.0,
-      "target_price": 16612.024,
-      "stop_price": 12573.6,
-      "entry_date": "2026-06-10",
-      "is_us": false,
-      "atr": 1335.7143,
-      "highest_price": 13630.0
-    },
-    "030530.KQ": {
-      "ticker": "030530.KQ",
-      "name": "원익홀딩스",
-      "qty": 1,
-      "entry_price": 24750.0,
-      "target_price": 28937.7,
-      "stop_price": 23017.5,
-      "entry_date": "2026-06-10",
-      "is_us": false,
-      "atr": 39214.2857,
-      "highest_price": 25250.0
-    },
-    "323280.KQ": {
-      "ticker": "323280.KQ",
-      "name": "태성",
-      "qty": 1,
-      "entry_price": 51700.0,
-      "target_price": 59361.94,
-      "stop_price": 48081.0,
-      "entry_date": "2026-06-10",
-      "is_us": false,
-      "atr": 13710.7143,
-      "highest_price": 53000.0
-    },
-    "267260.KS": {
-      "ticker": "267260.KS",
-      "name": "HD현대일렉트릭",
-      "qty": 1,
-      "entry_price": 1006000.0,
-      "target_price": 1100262.2,
-      "stop_price": 935580.0,
-      "entry_date": "2026-06-10",
-      "is_us": false,
-      "atr": 75428.5714,
-      "highest_price": 1021000.0
     }
   },
   "user_stopped": false

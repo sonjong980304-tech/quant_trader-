@@ -24,8 +24,8 @@ MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
 os.makedirs(MODEL_DIR, exist_ok=True)
 
 HORIZON    = 7      # 최대 보유 거래일 수
-TP_PCT     = 0.07   # 익절 기준 +7%
-SL_PCT     = 0.07   # 손절 기준 -7%
+TP_PCT     = 0.15   # 익절 기준 +15%
+SL_PCT     = 0.06   # 손절 기준 -6%
 N_SPLITS   = 5      # TimeSeriesSplit fold 수
 
 
@@ -115,8 +115,19 @@ def train(df: pd.DataFrame, ticker: str, agent: str = "") -> tuple[object, dict]
         logger.info("  [%s] Fold %d acc=%.3f", ticker, fold + 1,
                     accuracy_score(y_val, oof_preds[val_idx]))
 
-    # 전체 데이터로 최종 모델 재학습
-    pos_ratio        = y.mean()
+    # 마지막 20%를 캘리브레이션 홀드아웃으로 분리 (시계열 순서 유지, 누수 방지)
+    # final_model은 홀드아웃을 학습에 포함하지 않으므로 진정한 OOS 캘리브레이션 보장
+    n          = len(X)
+    calib_size = max(20, int(n * 0.20))
+    if calib_size >= n - 50:          # 학습 데이터가 너무 적어지면 축소
+        calib_size = max(20, n // 5)
+
+    X_final_tr = X[:-calib_size]
+    y_final_tr = y[:-calib_size]
+    X_calib    = X[-calib_size:]
+    y_calib    = y[-calib_size:]
+
+    pos_ratio        = y_final_tr.mean() if len(y_final_tr) > 0 else y.mean()
     scale_pos_weight = (1 - pos_ratio) / pos_ratio if pos_ratio > 0 else 1.0
     final_model = xgb.XGBClassifier(
         n_estimators      = 300,
@@ -129,26 +140,24 @@ def train(df: pd.DataFrame, ticker: str, agent: str = "") -> tuple[object, dict]
         random_state      = 42,
         verbosity         = 0,
     )
-    final_model.fit(X, y)
+    final_model.fit(X_final_tr, y_final_tr)
 
-    # Platt Scaling 캘리브레이션 — 마지막 fold 검증 데이터 사용 (시계열 순서 보존)
+    # Platt Scaling 캘리브레이션 — 홀드아웃 사용 (final_model이 학습에 포함하지 않은 데이터)
     from sklearn.calibration import CalibratedClassifierCV
     from sklearn.frozen import FrozenEstimator
     brier_raw = np.nan
     brier_cal = np.nan
-    if last_val_idx is not None and len(last_val_idx) >= 20:
-        X_val_last = X[last_val_idx]
-        y_val_last = y[last_val_idx]
-        proba_raw  = final_model.predict_proba(X_val_last)[:, 1]
-        brier_raw  = float(brier_score_loss(y_val_last, proba_raw))
+    if len(X_calib) >= 20:
+        proba_raw = final_model.predict_proba(X_calib)[:, 1]
+        brier_raw = float(brier_score_loss(y_calib, proba_raw))
 
         calibrated_model = CalibratedClassifierCV(
             FrozenEstimator(final_model), method="sigmoid"
         )
-        calibrated_model.fit(X_val_last, y_val_last)
+        calibrated_model.fit(X_calib, y_calib)
 
-        proba_cal = calibrated_model.predict_proba(X_val_last)[:, 1]
-        brier_cal = float(brier_score_loss(y_val_last, proba_cal))
+        proba_cal = calibrated_model.predict_proba(X_calib)[:, 1]
+        brier_cal = float(brier_score_loss(y_calib, proba_cal))
     else:
         calibrated_model = final_model
 

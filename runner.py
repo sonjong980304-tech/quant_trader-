@@ -22,6 +22,7 @@ import yfinance as yf
 
 from config import (
     STOCKS, US_STOCKS, MA_SHORT, MA_LONG, RSI_PERIOD, KIS_APP_KEY, GROWTH_ASSET_RATIO,
+    LIVE_TRADING,
 )
 from data_fetcher import fetch_ohlcv, get_minute_data
 from indicators import add_all_indicators, detect_crossover
@@ -275,6 +276,24 @@ def send_daily_summary():
 # 봇 활성화 게이트
 # ─────────────────────────────────────────────
 
+def _run_paper_daily_report():
+    """18:00 페이퍼 트레이딩 일일 리포트."""
+    try:
+        from paper_trader import daily_report
+        daily_report()
+    except Exception as e:
+        logger.warning("[Paper] 일일 리포트 실패: %s", e)
+
+
+def _run_paper_weekly_summary():
+    """일요일 20:00 페이퍼 트레이딩 주차별 집계."""
+    try:
+        from paper_trader import weekly_summary
+        weekly_summary()
+    except Exception as e:
+        logger.warning("[Paper] 주차별 집계 실패: %s", e)
+
+
 import json as _json
 
 _STATE_FILE = "/Users/gyuyeong/quant_trader/state.json"
@@ -381,9 +400,9 @@ def save_ml_position(ticker: str, name: str, qty: int, entry_price: float,
     state = _load_state()
     positions = state.setdefault("ml_positions", {})
     target_price = entry_price * (1 + avg_win)
-    # ATR 기반 손절: ATR이 가격의 10% 초과 시 데이터 이상으로 간주 → 7% 고정 폴백
-    # 정상 ATR이라도 stop은 최대 -7% 이하로 내려가지 않도록 캡
-    SL_PCT = 0.07
+    # ATR 기반 손절: ATR이 가격의 10% 초과 시 데이터 이상으로 간주 → 6% 고정 폴백
+    # 정상 ATR이라도 stop은 최대 -6% 이하로 내려가지 않도록 캡
+    SL_PCT = 0.06
     if atr > 0 and (atr / entry_price) < 0.10:
         stop_price = max(entry_price - 2.0 * atr, entry_price * (1 - SL_PCT))
     else:
@@ -490,7 +509,9 @@ def check_ml_positions():
             # 매도 실행
             logger.info("[%s] 자동 매도 — %s", ticker, reason)
             sell_price = cur_price or pos["entry_price"]
-            if KIS_APP_KEY:
+            if not LIVE_TRADING:
+                logger.warning("[LIVE_TRADING=False] 실매도 차단 — 페이퍼: %s %s", ticker, reason)
+            elif KIS_APP_KEY:
                 t = KISTrader()
                 code = ticker.replace(".KS", "").replace(".KQ", "")
                 if is_us:
@@ -525,6 +546,13 @@ def check_ml_positions():
             positions.pop(t, None)
         state["ml_positions"] = positions
         _save_state(state)
+
+    # 페이퍼 포지션 자동 청산 (백테스트와 동일한 TP/SL/7일 기준)
+    try:
+        from paper_trader import evaluate_positions_auto
+        evaluate_positions_auto()
+    except Exception as _pe:
+        logger.debug("[Paper] 포지션 평가 오류: %s", _pe)
 
 
 # ─────────────────────────────────────────────
@@ -679,6 +707,45 @@ def scan_growth_signals():
                 rp_qty   = max(1, int((total_asset * 0.01) / (2.0 * atr)))
             sig["risk_parity_qty"] = rp_qty
 
+        # ── LIVE_TRADING 게이트 ───────────────────────────────────────
+        # GATE A·B·C 검증 통과 전까지 실주문 차단 (config.LIVE_TRADING=True 시 해제)
+        if not LIVE_TRADING:
+            logger.warning(
+                "[LIVE_TRADING=False] 실주문 차단 — 페이퍼: %s 승률=%.1f%% rr=%.2f",
+                ticker, sig["win_prob"] * 100, sig.get("risk_reward", 0),
+            )
+            try:
+                from paper_trader import log_paper_signal, is_circuit_breaker_active
+                if not is_circuit_breaker_active():
+                    _ep = _get_current_price(ticker) or 0.0
+                    log_paper_signal(
+                        ticker           = ticker,
+                        name             = sig.get("name", ticker),
+                        agent            = sig.get("agent", "unknown"),
+                        trigger_types    = sig.get("trigger_types", []),
+                        win_prob         = sig["win_prob"],
+                        avg_win          = sig["avg_win"],
+                        avg_loss         = sig["avg_loss"],
+                        rr               = sig.get("risk_reward", 0.0),
+                        regime_prob      = sig.get("regime_prob"),
+                        regime_pass      = True,
+                        entry_price      = _ep,
+                        actual_price     = None,
+                        position_size_pct= 0.0,
+                        kelly_fraction   = None,
+                        auc_at_signal    = sig.get("model_auc"),
+                    )
+            except Exception as _pe:
+                logger.warning("[Paper] 신호 기록 실패: %s", _pe)
+            send_telegram(
+                f"📋 [페이퍼트레이딩] <b>{sig.get('name', ticker)} ({ticker})</b>\n"
+                f"승률 {sig['win_prob']*100:.1f}% | 손익비 {sig.get('risk_reward',0):.2f}\n"
+                f"<i>GATE A·B·C 미통과 — 실주문 차단</i>"
+            )
+            _alerted_today[ticker] = today_str
+            continue
+        # ─────────────────────────────────────────────────────────────
+
         result = send_signal_alert(sig, growth_cash)
         _alerted_today[ticker] = today_str
 
@@ -693,6 +760,127 @@ def scan_growth_signals():
                 atr          = sig.get("atr", 0.0),
                 is_us        = is_us,
             )
+
+
+# ─────────────────────────────────────────────
+# EOD 신호 스캔 (15:31) — Train/Serve Skew 해소 (GATE B)
+# ─────────────────────────────────────────────
+
+def scan_growth_signals_eod():
+    """
+    15:31 실행 — Close 확정 후 EOD 일봉으로 신호 탐지, 익일 시초가 예약.
+
+    학습 피처(EOD 완성 일봉)와 예측 피처를 동일하게 맞춰 Train/Serve Skew를 해소.
+    신호는 즉시 매수하지 않고 pending_orders에 등록 → execute_pending_orders("KR")가
+    09:00 시초가에 실행.
+    """
+    if not _check_activation():
+        return
+    if not is_kr_trading_day(datetime.now(KST).date()):
+        return
+
+    logger.info("EOD 신호 스캔 시작 (15:31)")
+
+    _, is_bear = get_market_regime()
+
+    from signals.krx_universe import get_krx_candidates
+    stocks_to_scan = get_krx_candidates(top_n=100)
+    if not stocks_to_scan:
+        stocks_to_scan = STOCKS
+
+    held = set(_load_state().get("ml_positions", {}).keys())
+    stocks_to_scan = {t: n for t, n in stocks_to_scan.items() if t not in held}
+
+    # 완성된 일봉만 사용 — 분봉 합성 없음 (학습 시점과 동일한 피처 생성)
+    def _fetch_eod_only(ticker: str) -> pd.DataFrame:
+        return _cached_fetch(ticker)
+
+    signals = scan_all(stocks_to_scan, _fetch_eod_only, is_bear=is_bear)
+    if not signals:
+        logger.info("EOD 신호 없음")
+        return
+
+    logger.info("EOD 신호 %d개 발생", len(signals))
+
+    total_asset = 0.0
+    if KIS_APP_KEY:
+        try:
+            total_asset = _get_total_asset(KISTrader())
+        except Exception:
+            pass
+    growth_cash = (total_asset * GROWTH_ASSET_RATIO) if total_asset > 0 else 10_000_000 * GROWTH_ASSET_RATIO
+
+    from pending_orders import add_pending_order
+    for sig in signals:
+        ticker = sig["ticker"]
+        is_us  = not (ticker.endswith(".KS") or ticker.endswith(".KQ"))
+        atr    = sig.get("atr", 0)
+
+        # Risk Parity 수량 (총 자산 1% 리스크 기준)
+        if atr > 0 and total_asset > 0:
+            rp_qty = max(1, int((total_asset * 0.01) / (2.0 * atr * (1400 if is_us else 1))))
+        else:
+            close  = max(sig.get("current_price", 10000), 1)
+            rp_qty = max(1, int(growth_cash * 0.02 / close))
+
+        code    = ticker.replace(".KS", "").replace(".KQ", "")
+        ml_meta = {
+            "avg_win":  sig["avg_win"],
+            "avg_loss": sig["avg_loss"],
+            "atr":      atr,
+            "is_us":    is_us,
+            "win_prob": sig["win_prob"],
+            "agent":    sig.get("agent", ""),
+        }
+
+        if not LIVE_TRADING:
+            logger.warning("[LIVE_TRADING=False] EOD 페이퍼: %s 승률=%.1f%%",
+                           ticker, sig["win_prob"] * 100)
+            try:
+                from paper_trader import log_paper_signal, is_circuit_breaker_active
+                if not is_circuit_breaker_active():
+                    # 익일 시초가 진입 — EOD 종가를 가정 진입가로 기록
+                    _ep_eod = float(sig.get("current_price") or 0.0)
+                    log_paper_signal(
+                        ticker           = ticker,
+                        name             = sig.get("name", ticker),
+                        agent            = sig.get("agent", "eod"),
+                        trigger_types    = sig.get("trigger_types", []),
+                        win_prob         = sig["win_prob"],
+                        avg_win          = sig["avg_win"],
+                        avg_loss         = sig["avg_loss"],
+                        rr               = sig.get("risk_reward", 0.0),
+                        regime_prob      = sig.get("regime_prob"),
+                        regime_pass      = True,
+                        entry_price      = _ep_eod,
+                        actual_price     = None,
+                        position_size_pct= 0.0,
+                        kelly_fraction   = None,
+                        auc_at_signal    = sig.get("model_auc"),
+                    )
+            except Exception as _pe:
+                logger.warning("[Paper] EOD 신호 기록 실패: %s", _pe)
+            send_telegram(
+                f"📋 [페이퍼/EOD] <b>{sig.get('name', ticker)} ({ticker})</b>\n"
+                f"승률 {sig['win_prob']*100:.1f}% | 손익비 {sig.get('risk_reward',0):.2f}\n"
+                f"<i>GATE A·B·C 미통과 — 실주문 차단</i>"
+            )
+            continue
+
+        order_id = add_pending_order(
+            action  = "BUY",
+            ticker  = ticker,
+            code    = code,
+            qty     = rp_qty,
+            is_us   = is_us,
+            note    = f"EOD ML 신호 | 승률={sig['win_prob']*100:.1f}%",
+            ml_meta = ml_meta,
+        )
+        send_telegram(
+            f"📌 [EOD 신호] <b>{sig.get('name', ticker)} ({ticker})</b>\n"
+            f"승률 {sig['win_prob']*100:.1f}% | 수량 {rp_qty}주\n"
+            f"익일 09:00 시초가 자동 매수 예약 (ID: {order_id})"
+        )
 
 
 # ─────────────────────────────────────────────
@@ -722,6 +910,7 @@ def execute_pending_orders(market: str):
             if is_us:
                 price_info = t.get_us_current_price(code)
                 price = price_info["price"]
+                name  = price_info.get("name", ticker)
                 if action == "BUY":
                     t.buy_us(code, qty)
                     from trade_logger import log_buy
@@ -744,6 +933,20 @@ def execute_pending_orders(market: str):
                     from trade_logger import log_sell
                     log_sell(ticker, price, qty=qty, notes="예약매도")
                 price_str = f"{price:,}원"
+
+            # ML EOD 신호 주문이면 포지션 추적 등록 (익절/손절/7일 청산용)
+            if action == "BUY" and o.get("ml_meta"):
+                meta = o["ml_meta"]
+                save_ml_position(
+                    ticker      = ticker,
+                    name        = name,
+                    qty         = qty,
+                    entry_price = float(price),
+                    avg_win     = meta.get("avg_win", 0.07),
+                    atr         = meta.get("atr", 0.0),
+                    is_us       = is_us,
+                )
+
             icon = "✅"
             msg_detail = f"{price_str} × {qty}주"
             logger.info("[예약주문] 완료 %s %s %s", action, ticker, msg_detail)
@@ -911,6 +1114,28 @@ def main():
     # 기존 보유 종목 기록 (최초 1회)
     _init_legacy_tickers()
 
+    # B1 전략 교체 기록 — paper 카운트 리셋 (이미 등록된 경우 skip)
+    try:
+        from paper_trader import _load, META_PATH, register_logic_change
+        _hist = _load(META_PATH, {}).get("logic_change_history", [])
+        if not any("B1" in h.get("reason", "") for h in _hist):
+            register_logic_change("B1: EOD 익일 시초가 진입 전략 교체 (slip 0.25%→0.05%)")
+    except Exception as _e:
+        logger.warning("로직 변경 등록 실패: %s", _e)
+
+    # G1 그리드 채택 — SL -7%→-6%, TP 7%→15%, 2주 페이퍼 시작 (이미 등록된 경우 skip)
+    try:
+        from datetime import date as _date
+        from paper_trader import _load, META_PATH, register_logic_change, snapshot_params
+        _hist = _load(META_PATH, {}).get("logic_change_history", [])
+        if not any("G1" in h.get("reason", "") for h in _hist):
+            register_logic_change(
+                f"G1: SL -7%→-6%, TP 7%→15%, EOD 익일시초가 진입 — 2주 페이퍼 시작 {_date.today()}"
+            )
+            snapshot_params()
+    except Exception as _e:
+        logger.warning("G1 로직 변경 등록 실패: %s", _e)
+
     schedule.clear()
 
     # 고정 스케줄
@@ -918,13 +1143,17 @@ def main():
     schedule.every().day.at("08:00").do(send_morning_briefing)
     schedule.every().day.at("09:00").do(lambda: execute_pending_orders("KR"))  # 한국장 시작
     schedule.every().day.at("15:00").do(send_daily_summary)
+    schedule.every().day.at("18:00").do(_run_paper_daily_report)
+    schedule.every().sunday.at("20:00").do(_run_paper_weekly_summary)
     schedule.every().day.at("22:30").do(retrain_us_models)   # 서머타임 미국장 시작
     schedule.every().day.at("22:30").do(lambda: execute_pending_orders("US"))  # 서머타임 US 예약 주문
     schedule.every().day.at("23:30").do(retrain_us_models)   # 동절기 미국장 시작
     schedule.every().day.at("23:30").do(lambda: execute_pending_orders("US"))  # 동절기 US 예약 주문
 
-    # ML 급등주 5분 스캔 (한국장 + 미국장 자동 필터링)
-    schedule.every(5).minutes.do(scan_growth_signals)
+    # B1: EOD 익일 시초가 전략 전환으로 장중 5분 신호 스캔 비활성화
+
+    # EOD 신호 스캔 15:31 — Close 확정 후 EOD 일봉 기준 신호 → 익일 시초가 예약 (GATE B)
+    schedule.every().day.at("15:31").do(scan_growth_signals_eod)
 
     # ML 포지션 자동 청산 (익절 / 7거래일 강제)
     schedule.every(5).minutes.do(check_ml_positions)
