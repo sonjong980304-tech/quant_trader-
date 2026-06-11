@@ -560,3 +560,40 @@ class TestWeeklySummary:
         pt.evaluate_positions({"005930.KS": 80000.0 * 1.16})
         summary = pt.weekly_summary()
         assert "1건" in summary
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# V8: 2단계 체결 구조 — entry_price=None
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestTwoStageEntry:
+    def test_entry_price_none_skips_eval(self):
+        """entry_price=None이면 evaluate_positions에서 청산 스킵."""
+        _signal(entry=None, eod_close=80000.0)
+        closed = pt.evaluate_positions({"005930.KS": 80000.0 * 1.20})
+        assert len(closed) == 0
+        trades = pt._load(pt.TRADES_PATH, [])
+        assert trades[0]["status"] == "open"
+
+    def test_update_entry_prices_sets_entry(self, monkeypatch):
+        """update_entry_prices: FDR 모킹으로 entry_price=None → 실제 Open으로 확정."""
+        import types, sys
+        import pandas as pd
+
+        open_price = 82000.0
+        _mock_fdr = types.ModuleType("FinanceDataReader")
+
+        def _mock_datareader(ticker, start):
+            return pd.DataFrame({"Open": [open_price], "Close": [83000.0]})
+
+        _mock_fdr.DataReader = _mock_datareader
+        monkeypatch.setitem(sys.modules, "FinanceDataReader", _mock_fdr)
+
+        _signal(entry=None, eod_close=80000.0)
+        updated = pt.update_entry_prices("KR")
+        assert len(updated) == 1
+
+        positions = pt._load(pt.POS_PATH, {})
+        pos = list(positions.values())[0]
+        assert pos["entry_price"] == round(open_price, 4)
+        assert pos["highest"] == round(open_price, 4)

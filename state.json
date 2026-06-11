@@ -3,19 +3,6 @@
   "legacy_tickers": [],
   "activated_at": "2026-06-10T10:21:01.596690+09:00",
   "note": "legacy_tickers에 보유 중인 기존 2종목 코드가 자동 기록됩니다. 모두 매도 시 bot_active가 true로 전환됩니다.",
-  "ml_positions": {
-    "005930.KS": {
-      "ticker": "005930.KS",
-      "name": "삼성전자",
-      "qty": 1,
-      "entry_price": 312000.0,
-      "target_price": 337116.0,
-      "stop_price": 290160.0,
-      "entry_date": "2026-06-10",
-      "is_us": false,
-      "atr": 172892.8571,
-      "highest_price": 312000.0
-    }
-  },
+  "ml_positions": {},
   "user_stopped": false
 }

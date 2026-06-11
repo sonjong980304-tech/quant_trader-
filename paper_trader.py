@@ -112,19 +112,29 @@ def log_paper_signal(
     rr: float,
     regime_prob: float | None,
     regime_pass: bool,
-    entry_price: float,            # 시초가 or 1분 평균가 (보수적 가정)
+    entry_price: float | None,     # None → 익일 시초가로 업데이트 예정 (2단계 체결)
     actual_price: float | None,    # 실제 체결가 (호가 스프레드 계산용)
     position_size_pct: float,
     kelly_fraction: float | None,
     auc_at_signal: float | None,   # 신호 시점 레짐 모델 AUC
+    eod_close: float | None = None,  # 신호 발생 시 EOD 종가 (갭 슬리피지 계산 기준)
 ) -> str:
-    """신호 기록. signal_id 반환."""
-    signal_id = str(uuid.uuid4())[:8]
-    now       = _now_kst()
+    """
+    신호 기록. signal_id 반환.
+
+    entry_price=None 전달 시 2단계 체결 구조:
+      포지션 entry_price=None 저장 → update_entry_prices() 호출 후 실제 Open으로 확정.
+      확정 전까지 evaluate_positions()에서 청산 체크 스킵.
+
+    entry_price=float 전달 시 기존 동작 (즉시 확정, 테스트 호환).
+    """
+    signal_id  = str(uuid.uuid4())[:8]
+    now        = _now_kst()
+    _eod_close = eod_close if eod_close else entry_price  # fallback
 
     # 실측 슬리피지 (actual 가격이 있을 때)
     actual_slip = None
-    if actual_price and entry_price > 0:
+    if actual_price and entry_price and entry_price > 0:
         actual_slip = abs(actual_price - entry_price) / entry_price
 
     record = {
@@ -140,8 +150,9 @@ def log_paper_signal(
         "rr":                         round(rr, 4),
         "regime_prob":                round(regime_prob, 4) if regime_prob is not None else None,
         "regime_pass":                regime_pass,
-        "hypothetical_entry_price":   round(entry_price, 4),
-        "hypothetical_entry_slippage": ASSUMED_SLIP,
+        "eod_close":                  round(_eod_close, 4) if _eod_close else None,
+        "hypothetical_entry_price":   round(entry_price, 4) if entry_price else None,
+        "hypothetical_entry_slippage": ASSUMED_SLIP if entry_price else None,
         "actual_price":               round(actual_price, 4) if actual_price else None,
         "actual_slippage":            round(actual_slip, 6) if actual_slip is not None else None,
         "position_size_pct":          round(position_size_pct, 4),
@@ -168,10 +179,11 @@ def log_paper_signal(
         "signal_id":   signal_id,
         "ticker":      ticker,
         "name":        name,
-        "entry_price": entry_price,
+        "entry_price": entry_price,   # None 허용 — update_entry_prices()로 확정
+        "eod_close":   _eod_close,
         "entry_date":  now,
         "trade_days":  0,
-        "highest":     entry_price,
+        "highest":     entry_price or 0.0,
     }
     _save(POS_PATH, positions)
 
@@ -212,7 +224,9 @@ def evaluate_positions(price_map: dict[str, float], trade_day: bool = True) -> l
             pos["trade_days"] += 1
         pos["highest"] = max(pos["highest"], cur)
 
-        entry = pos["entry_price"]
+        entry = pos.get("entry_price")
+        if entry is None:
+            continue  # 시초가 미확정 — update_entry_prices() 대기
         raw   = (cur - entry) / entry
 
         reason = None
@@ -831,6 +845,101 @@ def register_logic_change(reason: str):
         )
     except Exception:
         pass
+
+
+def update_entry_prices(market: str) -> list[str]:
+    """
+    KR: 09:05 KST, US: ET 09:35 이후 호출.
+    entry_price=None인 포지션에 실제 시초가(Open)를 기록.
+    반환: 업데이트된 종목 요약 목록.
+    """
+    positions = _load(POS_PATH, {})
+    trades    = _load(TRADES_PATH, [])
+
+    pending = {
+        k: v for k, v in positions.items()
+        if v.get("entry_price") is None
+        and (_is_kr(v["ticker"]) if market == "KR" else not _is_kr(v["ticker"]))
+    }
+    if not pending:
+        return []
+
+    tickers   = list({pos["ticker"] for pos in pending.values()})
+    open_map: dict[str, float] = {}
+
+    try:
+        import FinanceDataReader as fdr
+        from datetime import date
+        today = date.today().strftime("%Y-%m-%d")
+        for ticker in tickers:
+            try:
+                df = fdr.DataReader(ticker, today)
+                if not df.empty and "Open" in df.columns:
+                    val = float(df["Open"].iloc[-1])
+                    if val > 0:
+                        open_map[ticker] = val
+            except Exception:
+                pass
+    except ImportError:
+        try:
+            import yfinance as yf
+            for ticker in tickers:
+                try:
+                    data = yf.download(ticker, period="1d", progress=False, auto_adjust=True)
+                    if not data.empty:
+                        try:
+                            import pandas as pd
+                            if isinstance(data.columns, pd.MultiIndex):
+                                data.columns = data.columns.get_level_values(0)
+                        except Exception:
+                            pass
+                        val = float(data["Open"].iloc[-1])
+                        if val > 0:
+                            open_map[ticker] = val
+                except Exception:
+                    pass
+        except ImportError:
+            logger.warning("[Paper] 시초가 조회 라이브러리 없음 (fdr/yf)")
+            return []
+
+    trade_idx = {t["signal_id"]: i for i, t in enumerate(trades)}
+    updated: list[str] = []
+
+    for sig_id, pos in pending.items():
+        ticker     = pos["ticker"]
+        open_price = open_map.get(ticker)
+        if not open_price:
+            logger.warning("[Paper] 시초가 조회 실패 — %s 미업데이트", ticker)
+            continue
+
+        # 포지션 확정
+        positions[sig_id]["entry_price"] = round(open_price, 4)
+        positions[sig_id]["highest"]     = round(open_price, 4)
+
+        # trades 업데이트 + 실제 갭 슬리피지 계산
+        idx = trade_idx.get(sig_id)
+        if idx is not None:
+            eod_close = trades[idx].get("eod_close")
+            gap_slip  = abs(open_price - eod_close) / eod_close if eod_close else None
+            trades[idx]["hypothetical_entry_price"]    = round(open_price, 4)
+            trades[idx]["hypothetical_entry_slippage"] = round(gap_slip, 6) if gap_slip is not None else None
+
+        updated.append(f"{pos.get('name', ticker)}({ticker}) {open_price:,.0f}")
+        logger.info("[Paper] 시초가 확정: %s open=%.4f", ticker, open_price)
+
+    if updated:
+        _save(POS_PATH, positions)
+        _save(TRADES_PATH, trades)
+        try:
+            from notifier import send_telegram
+            send_telegram(
+                f"📌 <b>[페이퍼/{market}] 시초가 진입 확정</b>\n"
+                + "\n".join(f"  • {u}" for u in updated)
+            )
+        except Exception:
+            pass
+
+    return updated
 
 
 def get_start_date() -> str | None:

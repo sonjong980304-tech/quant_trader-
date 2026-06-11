@@ -316,6 +316,17 @@ def _run_paper_weekly_summary():
         logger.warning("[Paper] 주차별 집계 실패: %s", e)
 
 
+def _run_paper_entry_update(market: str):
+    """장 시작 직후 호출 — entry_price=None 포지션에 실제 시초가 확정.
+    KR: 09:05 KST, US: ET 09:35 (KST 22:35 서머/23:35 동절기).
+    """
+    try:
+        from paper_trader import update_entry_prices
+        update_entry_prices(market)
+    except Exception as e:
+        logger.warning("[Paper] 시초가 업데이트 실패 (%s): %s", market, e)
+
+
 # ─────────────────────────────────────────────
 # 장 시간 (한국 / 미국)
 # ─────────────────────────────────────────────
@@ -478,7 +489,6 @@ def scan_growth_signals():
             try:
                 from paper_trader import log_paper_signal, is_circuit_breaker_active
                 if not is_circuit_breaker_active():
-                    _ep = _get_current_price(ticker) or 0.0
                     log_paper_signal(
                         ticker           = ticker,
                         name             = sig.get("name", ticker),
@@ -490,11 +500,12 @@ def scan_growth_signals():
                         rr               = sig.get("risk_reward", 0.0),
                         regime_prob      = sig.get("regime_prob"),
                         regime_pass      = True,
-                        entry_price      = _ep,
+                        entry_price      = None,
                         actual_price     = None,
                         position_size_pct= 0.0,
                         kelly_fraction   = None,
                         auc_at_signal    = sig.get("model_auc"),
+                        eod_close        = _get_current_price(ticker) or 0.0,
                     )
             except Exception as _pe:
                 logger.warning("[Paper] 신호 기록 실패: %s", _pe)
@@ -600,7 +611,7 @@ def scan_growth_signals_eod():
             try:
                 from paper_trader import log_paper_signal, is_circuit_breaker_active
                 if not is_circuit_breaker_active():
-                    # 익일 시초가 진입 — EOD 종가를 가정 진입가로 기록
+                    # 익일 시초가 진입 — EOD 종가는 eod_close로 저장, entry_price는 09:05에 확정
                     _ep_eod = float(sig.get("current_price") or 0.0)
                     log_paper_signal(
                         ticker           = ticker,
@@ -613,11 +624,12 @@ def scan_growth_signals_eod():
                         rr               = sig.get("risk_reward", 0.0),
                         regime_prob      = sig.get("regime_prob"),
                         regime_pass      = True,
-                        entry_price      = _ep_eod,
+                        entry_price      = None,
                         actual_price     = None,
                         position_size_pct= 0.0,
                         kelly_fraction   = None,
                         auc_at_signal    = sig.get("model_auc"),
+                        eod_close        = _ep_eod,
                     )
             except Exception as _pe:
                 logger.warning("[Paper] EOD 신호 기록 실패: %s", _pe)
@@ -903,6 +915,7 @@ def main():
     schedule.every().day.at("07:30").do(retrain_kr_models)
     schedule.every().day.at("08:00").do(send_morning_briefing)
     schedule.every().day.at("09:00").do(lambda: execute_pending_orders("KR"))  # 한국장 시작
+    schedule.every().day.at("09:05").do(lambda: _run_paper_entry_update("KR"))  # KR 시초가 확정
     schedule.every().day.at("15:00").do(send_daily_summary)
     schedule.every().day.at("15:35").do(_run_paper_daily_report_kr)   # KR 마감 직후
     schedule.every().day.at("05:30").do(_run_paper_daily_report_us)   # US 마감 직후 (서머타임)
@@ -910,8 +923,10 @@ def main():
     schedule.every().sunday.at("20:00").do(_run_paper_weekly_summary)
     schedule.every().day.at("22:30").do(retrain_us_models)   # 서머타임 미국장 시작
     schedule.every().day.at("22:30").do(lambda: execute_pending_orders("US"))  # 서머타임 US 예약 주문
+    schedule.every().day.at("22:35").do(lambda: _run_paper_entry_update("US"))  # US 시초가 확정 (서머타임)
     schedule.every().day.at("23:30").do(retrain_us_models)   # 동절기 미국장 시작
     schedule.every().day.at("23:30").do(lambda: execute_pending_orders("US"))  # 동절기 US 예약 주문
+    schedule.every().day.at("23:35").do(lambda: _run_paper_entry_update("US"))  # US 시초가 확정 (동절기)
 
     # B1: EOD 익일 시초가 전략 전환으로 장중 5분 신호 스캔 비활성화
 
