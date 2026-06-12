@@ -931,7 +931,7 @@ def main():
     schedule.every().day.at("09:00").do(lambda: execute_pending_orders("KR"))  # 한국장 시작
     schedule.every().day.at("09:05").do(lambda: _run_paper_entry_update("KR"))  # KR 시초가 확정
     schedule.every().day.at("15:00").do(send_daily_summary)
-    schedule.every().day.at("15:30").do(_run_paper_evaluate_kr)        # KR TP/SL 청산 평가
+    schedule.every().day.at("15:30").do(_run_paper_evaluate_kr_eod)     # KR EOD — trade_days+1 + TP/SL
     schedule.every().day.at("15:35").do(_run_paper_daily_report_kr)   # KR 마감 직후
     schedule.every().day.at("05:25").do(lambda: __import__('paper_trader').evaluate_positions_auto())   # US TP/SL (서머타임)
     schedule.every().day.at("05:30").do(_run_paper_daily_report_us)   # US 마감 직후 (서머타임)
