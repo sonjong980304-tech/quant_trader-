@@ -282,8 +282,9 @@ def evaluate_positions(price_map: dict[str, float], trade_day: bool = True) -> l
 
 def evaluate_positions_auto() -> list[dict]:
     """
-    paper_positions.json의 open 포지션을 시장 데이터로 자동 평가·청산.
-    KIS API 대신 FinanceDataReader / yfinance 사용.
+    paper_positions.json의 open 포지션을 실시간 현재가로 자동 평가·청산.
+    장중: yfinance fast_info.last_price (실시간), 장외: 최근 종가 fallback.
+    runner.py에서 5분마다 호출 — 실제 매매봇(check_ml_positions)과 동일 주기.
     """
     positions = _load(POS_PATH, {})
     if not positions:
@@ -292,30 +293,18 @@ def evaluate_positions_auto() -> list[dict]:
     tickers   = list({pos["ticker"] for pos in positions.values()})
     price_map: dict[str, float] = {}
 
-    try:
-        import FinanceDataReader as fdr
-        from datetime import date, timedelta
-        start = (date.today() - timedelta(days=3)).strftime("%Y-%m-%d")
-        for ticker in tickers:
-            try:
-                df = fdr.DataReader(ticker, start)
-                if not df.empty:
-                    price_map[ticker] = float(df["Close"].iloc[-1])
-            except Exception:
-                pass
-    except ImportError:
+    import yfinance as yf
+    for ticker in tickers:
         try:
-            import yfinance as yf
-            for ticker in tickers:
-                try:
-                    data = yf.download(ticker, period="5d", progress=False)
-                    if not data.empty:
-                        price_map[ticker] = float(data["Close"].squeeze().iloc[-1])
-                except Exception:
-                    pass
-        except ImportError:
-            logger.warning("[Paper] 현재가 조회 라이브러리 없음 (fdr/yf)")
-            return []
+            info  = yf.Ticker(ticker).fast_info
+            price = float(info.last_price or 0)
+            if price > 0:
+                price_map[ticker] = price
+        except Exception:
+            pass
+
+    if not price_map:
+        logger.warning("[Paper] 현재가 조회 실패 — 평가 스킵")
 
     closed = evaluate_positions(price_map)
     if closed:
