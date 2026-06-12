@@ -947,6 +947,8 @@ def main():
 
     # ML 포지션 자동 청산 (익절 / 7거래일 강제)
     schedule.every(5).minutes.do(check_ml_positions)
+    # 페이퍼 포지션 장중 TP/SL 평가 — 실매매봇과 동일 주기
+    schedule.every(5).minutes.do(lambda: __import__('paper_trader').evaluate_positions_auto())
 
     # 월간 리밸런싱 (매월 1일 08:30)
     schedule.every().day.at("08:30").do(
