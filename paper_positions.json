@@ -30,10 +30,11 @@
     "signal_id": "4da80e3e",
     "ticker": "108490.KQ",
     "name": "로보티즈",
-    "entry_price": 274500.0,
-    "entry_date": "2026-06-11 15:32:19",
-    "trade_days": 0,
-    "highest": 274500.0
+    "entry_price": 316000.0,
+    "eod_close": 274500.0,
+    "entry_date": "2026-06-12 09:05:00",
+    "trade_days": 1,
+    "highest": 329500.0
   },
   "c4e273fd": {
     "signal_id": "c4e273fd",
