@@ -34,5 +34,45 @@
     "entry_date": "2026-06-11 15:32:19",
     "trade_days": 0,
     "highest": 274500.0
+  },
+  "c4e273fd": {
+    "signal_id": "c4e273fd",
+    "ticker": "066570.KS",
+    "name": "LG전자",
+    "entry_price": null,
+    "eod_close": 226000.0,
+    "entry_date": "2026-06-12 15:31:55",
+    "trade_days": 0,
+    "highest": 0.0
+  },
+  "60fe9a15": {
+    "signal_id": "60fe9a15",
+    "ticker": "108490.KQ",
+    "name": "로보티즈",
+    "entry_price": null,
+    "eod_close": 286500.0,
+    "entry_date": "2026-06-12 15:31:56",
+    "trade_days": 0,
+    "highest": 0.0
+  },
+  "b99c9cbd": {
+    "signal_id": "b99c9cbd",
+    "ticker": "100790.KQ",
+    "name": "미래에셋벤처투자",
+    "entry_price": null,
+    "eod_close": 42100.0,
+    "entry_date": "2026-06-12 15:31:57",
+    "trade_days": 0,
+    "highest": 0.0
+  },
+  "f479e602": {
+    "signal_id": "f479e602",
+    "ticker": "319400.KQ",
+    "name": "현대무벡스",
+    "entry_price": null,
+    "eod_close": 40800.0,
+    "entry_date": "2026-06-12 15:31:59",
+    "trade_days": 0,
+    "highest": 0.0
   }
 }

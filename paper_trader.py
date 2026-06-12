@@ -693,13 +693,31 @@ def daily_report(market: str | None = None) -> str:
             f"{c['exit_reason']} {c['net_pnl_pct']:+.3f}%"
         )
 
-    # 미청산 포지션
+    # 미청산 포지션 (현재가·수익률 포함)
     lines.append(f"\n미청산 포지션: {len(pos_filtered)}건")
     for pos in pos_filtered.values():
-        lines.append(
-            f"  • {pos['name']}({pos['ticker']}) "
-            f"{pos['trade_days']}일 경과"
-        )
+        entry = pos.get("entry_price")
+        if entry:
+            try:
+                import yfinance as yf
+                cur = yf.Ticker(pos["ticker"]).fast_info.last_price or 0
+                pnl = (cur - entry) / entry * 100
+                arrow = "▲" if pnl >= 0 else "▼"
+                lines.append(
+                    f"  • {pos['name']}({pos['ticker']}) "
+                    f"진입 {entry:,.0f}원 → 현재 {cur:,.0f}원 "
+                    f"{arrow}{abs(pnl):.2f}% ({pos['trade_days']}일)"
+                )
+            except Exception:
+                lines.append(
+                    f"  • {pos['name']}({pos['ticker']}) "
+                    f"진입 {entry:,.0f}원 ({pos['trade_days']}일 경과)"
+                )
+        else:
+            lines.append(
+                f"  • {pos['name']}({pos['ticker']}) "
+                f"시초가 미확정 — 내일 진입 예정"
+            )
 
     # ── KR 섹션 ──────────────────────────────────────────────────────────────
     if market in (None, "KR"):
