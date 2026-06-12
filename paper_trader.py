@@ -305,6 +305,7 @@ def evaluate_positions_auto() -> list[dict]:
 
     if not price_map:
         logger.warning("[Paper] 현재가 조회 실패 — 평가 스킵")
+        return []
 
     closed = evaluate_positions(price_map)
     if closed:
