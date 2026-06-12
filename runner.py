@@ -281,6 +281,15 @@ def send_daily_summary():
 # 봇 활성화 게이트
 # ─────────────────────────────────────────────
 
+def _run_paper_evaluate_kr():
+    """15:30 KR 페이퍼 포지션 TP/SL 자동 청산 평가 (장 마감 직전)."""
+    try:
+        from paper_trader import evaluate_positions_auto
+        evaluate_positions_auto()
+    except Exception as e:
+        logger.warning("[Paper] KR 포지션 평가 실패: %s", e)
+
+
 def _run_paper_daily_report_kr():
     """15:35 KR 페이퍼 트레이딩 일일 리포트 (한국 증시 마감 직후)."""
     try:
