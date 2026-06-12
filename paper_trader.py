@@ -280,11 +280,12 @@ def evaluate_positions(price_map: dict[str, float], trade_day: bool = True) -> l
 # check_ml_positions()와 동일한 주기로 runner에서 호출
 # ─────────────────────────────────────────────────────────────────────────────
 
-def evaluate_positions_auto() -> list[dict]:
+def evaluate_positions_auto(trade_day: bool = False) -> list[dict]:
     """
     paper_positions.json의 open 포지션을 실시간 현재가로 자동 평가·청산.
     장중: yfinance fast_info.last_price (실시간), 장외: 최근 종가 fallback.
-    runner.py에서 5분마다 호출 — 실제 매매봇(check_ml_positions)과 동일 주기.
+    trade_day=False (기본): 장중 5분 주기 호출 — trade_days 증가 없음, TP/SL만 체크.
+    trade_day=True: EOD 15:30 호출 — 하루치 trade_days 증가.
     """
     positions = _load(POS_PATH, {})
     if not positions:
