@@ -281,13 +281,18 @@ def send_daily_summary():
 # 봇 활성화 게이트
 # ─────────────────────────────────────────────
 
-def _run_paper_evaluate_kr():
-    """15:30 KR 페이퍼 포지션 TP/SL 자동 청산 평가 (장 마감 직전)."""
+def _run_paper_evaluate_kr(trade_day: bool = False):
+    """페이퍼 포지션 TP/SL 평가. trade_day=True 일 때만 trade_days 1일 증가."""
     try:
         from paper_trader import evaluate_positions_auto
-        evaluate_positions_auto()
+        evaluate_positions_auto(trade_day=trade_day)
     except Exception as e:
         logger.warning("[Paper] KR 포지션 평가 실패: %s", e)
+
+
+def _run_paper_evaluate_kr_eod():
+    """15:30 EOD 전용 — trade_days 1일 증가 + TP/SL 체크."""
+    _run_paper_evaluate_kr(trade_day=True)
 
 
 def _run_paper_daily_report_kr():
