@@ -220,13 +220,13 @@ def evaluate_positions(price_map: dict[str, float], trade_day: bool = True) -> l
         if cur is None:
             continue
 
+        entry = pos.get("entry_price")
+        if entry is None:
+            continue  # 시초가 미확정 — trade_days 증가 없음, update_entry_prices() 대기
+
         if trade_day:
             pos["trade_days"] += 1
         pos["highest"] = max(pos["highest"], cur)
-
-        entry = pos.get("entry_price")
-        if entry is None:
-            continue  # 시초가 미확정 — update_entry_prices() 대기
         raw   = (cur - entry) / entry
 
         reason = None

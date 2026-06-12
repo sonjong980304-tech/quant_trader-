@@ -1,41 +1,4 @@
 {
-  "185dfd31": {
-    "signal_id": "185dfd31",
-    "ticker": "071050.KS",
-    "name": "한국금융지주",
-    "entry_price": 229000.0,
-    "entry_date": "2026-06-11 15:32:15",
-    "trade_days": 0,
-    "highest": 229000.0
-  },
-  "b7e5262f": {
-    "signal_id": "b7e5262f",
-    "ticker": "267250.KS",
-    "name": "HD현대",
-    "entry_price": 242500.0,
-    "entry_date": "2026-06-11 15:32:16",
-    "trade_days": 0,
-    "highest": 242500.0
-  },
-  "40dadbd9": {
-    "signal_id": "40dadbd9",
-    "ticker": "100790.KQ",
-    "name": "미래에셋벤처투자",
-    "entry_price": 39450.0,
-    "entry_date": "2026-06-11 15:32:18",
-    "trade_days": 0,
-    "highest": 39450.0
-  },
-  "4da80e3e": {
-    "signal_id": "4da80e3e",
-    "ticker": "108490.KQ",
-    "name": "로보티즈",
-    "entry_price": 316000.0,
-    "eod_close": 274500.0,
-    "entry_date": "2026-06-12 09:05:00",
-    "trade_days": 1,
-    "highest": 329500.0
-  },
   "c4e273fd": {
     "signal_id": "c4e273fd",
     "ticker": "066570.KS",
@@ -43,8 +6,8 @@
     "entry_price": null,
     "eod_close": 226000.0,
     "entry_date": "2026-06-12 15:31:55",
-    "trade_days": 0,
-    "highest": 0.0
+    "trade_days": 7,
+    "highest": 225500.0
   },
   "60fe9a15": {
     "signal_id": "60fe9a15",
@@ -53,8 +16,8 @@
     "entry_price": null,
     "eod_close": 286500.0,
     "entry_date": "2026-06-12 15:31:56",
-    "trade_days": 0,
-    "highest": 0.0
+    "trade_days": 7,
+    "highest": 330000.0
   },
   "b99c9cbd": {
     "signal_id": "b99c9cbd",
@@ -63,8 +26,8 @@
     "entry_price": null,
     "eod_close": 42100.0,
     "entry_date": "2026-06-12 15:31:57",
-    "trade_days": 0,
-    "highest": 0.0
+    "trade_days": 7,
+    "highest": 38800.0
   },
   "f479e602": {
     "signal_id": "f479e602",
@@ -73,7 +36,7 @@
     "entry_price": null,
     "eod_close": 40800.0,
     "entry_date": "2026-06-12 15:31:59",
-    "trade_days": 0,
-    "highest": 0.0
+    "trade_days": 7,
+    "highest": 39150.0
   }
 }
