@@ -308,7 +308,7 @@ def evaluate_positions_auto(trade_day: bool = False) -> list[dict]:
         logger.warning("[Paper] 현재가 조회 실패 — 평가 스킵")
         return []
 
-    closed = evaluate_positions(price_map)
+    closed = evaluate_positions(price_map, trade_day=trade_day)
     if closed:
         try:
             from notifier import send_telegram
