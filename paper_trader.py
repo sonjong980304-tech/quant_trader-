@@ -31,7 +31,7 @@ META_PATH       = os.path.join(_BASE_DIR, "paper_meta.json")
 SNAPSHOT_PATH   = os.path.join(_BASE_DIR, "paper_params_snapshot.json")
 
 # ─── 백테스트 공유 비용 함수 (V7: 별도 구현 금지) ─────────────────────────────
-# _barrier_exit()는 OHLCV window 방식 → paper는 EOD Close 방식으로 다름 (명시적 설계 차이)
+# _barrier_exit()는 OHLCV window 방식 → paper는 EOD Close 방식 (단, 장중 TP/SL은 fast_info 실시간가 사용)
 # _apply_costs()는 수치가 동일하므로 공유해서 drift 방지
 from backtest_walkforward import _apply_costs as _bt_apply_costs
 
