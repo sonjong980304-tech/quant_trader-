@@ -45,8 +45,9 @@ def is_kr_trading_day(d: date = None) -> bool:
             logger.warning("KRX 영업일 조회 실패 — 주말 체크로 폴백: %s", e)
             return d.weekday() < 5
 
-    # 오늘 날짜가 캐시에 없으면 장 시작 전 → 주말이 아니면 영업일로 간주
-    if d == today and d not in _CACHE:
+    # 오늘 이후(미래 포함) 날짜가 캐시에 없으면 pykrx가 미래 데이터를 반환 안 하므로
+    # 주말 체크로 폴백 (공휴일은 미반영되나 미래 날짜 스케줄링에는 충분)
+    if d >= today and d not in _CACHE:
         return d.weekday() < 5
 
     return d in _CACHE
