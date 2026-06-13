@@ -787,7 +787,7 @@ def _format_f1_result(all_trades: dict[str, list[dict]], stocks: dict) -> str:
     b1_ev = metrics["trigger"]["ev"] * 100
     lines += [
         "",
-        f"<b>ML vs B1 기여도 분석</b>",
+        "<b>ML vs B1 기여도 분석</b>",
         f"  ML EV − B1 EV = {ml_ev - b1_ev:+.3f}%p",
         f"  차이 95% CI: [{diff_low*100:+.3f}%, {diff_high*100:+.3f}%]",
     ]
