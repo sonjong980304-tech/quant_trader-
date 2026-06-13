@@ -313,7 +313,6 @@ def evaluate_positions_auto(trade_day: bool = False) -> list[dict]:
         try:
             from notifier import send_telegram
             for c in closed:
-                icon = "✅" if c["net_pnl"] > 0 else "❌"
                 send_telegram(
                     f"📋 <b>[페이퍼 청산]</b> {c['name']}({c['ticker']})\n"
                     f"사유: {c['reason']} | 세후 {c['net_pnl']:+.3f}% | {c['days']}일 보유"

@@ -20,7 +20,7 @@ from dateutil.relativedelta import relativedelta
 import yfinance as yf
 from openai import OpenAI
 
-from config import OPENAI_API_KEY, TELEGRAM_CHAT_ID
+from config import OPENAI_API_KEY
 from notifier import send_telegram
 
 logger = logging.getLogger(__name__)

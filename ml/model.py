@@ -110,7 +110,6 @@ def train(df: pd.DataFrame, ticker: str, agent: str = "") -> tuple[object, dict]
         )
         oof_preds[val_idx] = fold_model.predict(X_val)
         oof_proba[val_idx] = fold_model.predict_proba(X_val)[:, 1]
-        last_val_idx       = val_idx
         logger.info("  [%s] Fold %d acc=%.3f", ticker, fold + 1,
                     accuracy_score(y_val, oof_preds[val_idx]))
 
