@@ -814,7 +814,6 @@ async def cmd_scanstocks(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         def _scan():
             from signals.scanner import scan_all
-            from signals.alert import send_signal_alert
             from config import KIS_APP_KEY, GROWTH_ASSET_RATIO
             from data_fetcher import fetch_ohlcv
 

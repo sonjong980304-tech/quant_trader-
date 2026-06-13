@@ -88,8 +88,6 @@ def check_and_execute(
 
         ctype  = order["condition_type"]
         cvalue = float(order["condition_value"])
-        action = order["action"]
-        name   = order["stock_name"]
 
         triggered = False
 

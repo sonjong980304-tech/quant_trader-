@@ -6,7 +6,6 @@ ConversationBufferWindowMemory로 대화 기록 유지.
 """
 
 import logging
-from functools import lru_cache
 
 from langchain_openai import ChatOpenAI
 from langchain.agents import AgentExecutor, create_openai_tools_agent
@@ -15,10 +14,6 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.tools import tool
 
 from config import OPENAI_API_KEY, STOCKS, MA_SHORT, MA_LONG
-from config import (
-    VOLUME_INCREASE_RATIO, VOLUME_SURGE_RATIO,
-    VOLUME_SURGE_MINUTE_RATIO, VOLUME_LOOKBACK_DAYS,
-)
 
 logger = logging.getLogger(__name__)
 

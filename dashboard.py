@@ -85,7 +85,7 @@ def load_balance():
         from trader import KISTrader
         t = KISTrader()
         return t.get_balance(), t.get_available_cash()
-    except Exception as e:
+    except Exception:
         return [], 0
 
 
