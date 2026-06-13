@@ -14,7 +14,7 @@ import threading
 import logging
 import logging.handlers
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, date, timedelta
+from datetime import datetime, date
 
 import pandas as pd
 import pytz

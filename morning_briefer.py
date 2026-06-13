@@ -16,7 +16,7 @@ import pytz
 from openai import OpenAI
 from tavily import TavilyClient
 
-from config import STOCKS, OPENAI_API_KEY, TELEGRAM_CHAT_ID
+from config import STOCKS, OPENAI_API_KEY
 from notifier import send_telegram
 from market_calendar import is_kr_trading_day
 

@@ -5,7 +5,6 @@ OAuth 토큰 발급, 주문, 잔고 조회 등 실제 매매 기능
 
 import os
 import json
-import time
 import logging
 import requests
 from datetime import datetime, timedelta

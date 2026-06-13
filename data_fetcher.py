@@ -5,7 +5,7 @@ data_fetcher.py - yfinance를 이용한 주가 데이터 수집
 import yfinance as yf
 import pandas as pd
 from datetime import datetime, timedelta
-from config import STOCKS, BACKTEST_PERIOD_YEARS
+from config import STOCKS
 
 
 def fetch_ohlcv(ticker: str, period_years: int = 1) -> pd.DataFrame:
