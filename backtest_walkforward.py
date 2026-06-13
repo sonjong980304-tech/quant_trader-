@@ -450,7 +450,7 @@ def _format_result(trades: list[dict], stocks: dict) -> str:
         "",
         f"청산 유형: TP={reason_counts.get('tp',0)} / SL={reason_counts.get('sl',0)} / 기간={reason_counts.get('vertical',0)}",
         "",
-        f"<b>[GATE C-1] 부트스트랩 95% CI (n=2000)</b>",
+        "<b>[GATE C-1] 부트스트랩 95% CI (n=2000)</b>",
         f"  EV CI: [{ci_low:+.4f}, {ci_high:+.4f}]",
         f"  {'✅ CI 하단 > 0 — 엣지 통계적으로 유의' if ci_pass else '❌ CI 하단 ≤ 0 — 엣지 불안정'}",
         "",
@@ -463,7 +463,7 @@ def _format_result(trades: list[dict], stocks: dict) -> str:
 
     lines += [
         "",
-        f"<b>[GATE C-3] 종목 집중도</b>",
+        "<b>[GATE C-3] 종목 집중도</b>",
         f"  {concentration_warn}",
     ]
 
@@ -1308,7 +1308,6 @@ def run_h3_stability(stocks: dict | None = None) -> str:
     ticker_rows.sort(reverse=True)
     pos_tickers = neg_tickers = 0
     for ev, name, tick, m in ticker_rows:
-        flag = "+" if m["ev"] > 0 else "-"
         if m["ev"] > 0:
             pos_tickers += 1
         else:
