@@ -314,7 +314,7 @@ def run_backtest(stocks: dict | None = None) -> str:
     no_sig = [r for r in results if r.get("trades", 0) == 0]
 
     lines = [
-        f"📊 <b>45일 분봉 ML 백테스트 결과</b>",
+        "📊 <b>45일 분봉 ML 백테스트 결과</b>",
         f"기간: {start_date} ~ {date.today()}",
         f"대상: {len(stocks)}종목 / 신호 발생: {len(active)}종목\n",
     ]

@@ -1138,7 +1138,6 @@ def _walk_regime_mode(ticker: str, df_daily: pd.DataFrame,
                 continue
 
             entry_price = float(future_all["Open"].iloc[0])
-            entry_date  = future_all.index[0]
 
             exit_window = future_all.iloc[1: HORIZON + 1]
             if exit_window.empty:
@@ -1148,11 +1147,6 @@ def _walk_regime_mode(ticker: str, df_daily: pd.DataFrame,
             net_pnl         = _apply_costs(raw_pnl, is_korean)
 
             exit_date  = exit_window.index[min(HORIZON - 1, len(exit_window) - 1)]
-            exit_price = (
-                entry_price * (1 + TP_PCT)    if reason == "tp"
-                else entry_price * (1 - SL_PCT) if reason == "sl"
-                else float(exit_window["Close"].iloc[-1])
-            )
             in_position_until = exit_date
             trades.append({
                 "ticker":      ticker,
