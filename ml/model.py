@@ -83,7 +83,6 @@ def train(df: pd.DataFrame, ticker: str, agent: str = "") -> tuple[object, dict]
     tscv         = TimeSeriesSplit(n_splits=N_SPLITS)
     oof_preds    = np.zeros(len(X), dtype=int)
     oof_proba    = np.zeros(len(X), dtype=float)
-    last_val_idx = None
 
     for fold, (tr_idx, val_idx) in enumerate(tscv.split(X)):
         X_tr, X_val = X[tr_idx], X[val_idx]

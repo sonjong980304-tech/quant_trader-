@@ -100,7 +100,7 @@ class TestEvaluatePositions:
     def test_tp_triggers(self):
         self._setup()
         tp_price = self.ENTRY * 1.152           # 15.2% 상승 (>TP_PCT=15%)
-        closed = pt.evaluate_positions({f"005930.KS": tp_price})
+        closed = pt.evaluate_positions({"005930.KS": tp_price})
         assert len(closed) == 1
         assert closed[0]["reason"] == "TP"
 
