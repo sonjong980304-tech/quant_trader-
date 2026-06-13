@@ -19,7 +19,7 @@ import logging
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
-from config import TELEGRAM_BOT_TOKEN, STOCKS, MA_SHORT, MA_LONG, RSI_PERIOD
+from config import TELEGRAM_BOT_TOKEN, MA_SHORT, MA_LONG, RSI_PERIOD
 from langchain_agent import ask as gpt_ask, clear_history as gpt_clear
 from data_fetcher import fetch_ohlcv
 from indicators import add_all_indicators, detect_crossover
@@ -42,7 +42,7 @@ CONFIG_PATH = "/Users/gyuyeong/quant_trader/config.py"
 # ─────────────────────────────────────────────
 def read_stocks_from_config() -> dict:
     """config.py에서 현재 STOCKS 딕셔너리를 읽어 반환"""
-    import importlib, sys
+    import sys
     # 모듈 캐시 초기화 후 재로드
     if "config" in sys.modules:
         del sys.modules["config"]
@@ -187,7 +187,7 @@ async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 f"   MA{MA_SHORT}: {sig['ma_short']:,.0f} / MA{MA_LONG}: {sig['ma_long']:,.0f}\n"
                 f"   신호: {signal_txt}\n"
             )
-        except Exception as e:
+        except Exception:
             lines.append(f"⚠️ <b>{name}</b>: 조회 실패\n")
 
     price_label = "실시간" if trader else "전일 종가"
@@ -755,7 +755,6 @@ async def cmd_pendingorders(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     from pending_orders import list_pending_orders, remove_pending_order
     args = ctx.args
     if args and args[0].lower() == "cancel" and len(args) > 1:
-        from pending_orders import remove_pending_order
         ok = remove_pending_order(args[1])
         await update.message.reply_text(
             f"✅ 예약 취소 완료 ({args[1]})" if ok else f"⚠️ ID {args[1]} 예약 없음"

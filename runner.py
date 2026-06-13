@@ -32,7 +32,7 @@ from position_manager import (
 from data_fetcher import fetch_ohlcv, get_minute_data
 from indicators import add_all_indicators, detect_crossover
 from strategy import generate_signals, get_latest_signal
-from trader import positions, KISTrader
+from trader import KISTrader
 from notifier import send_telegram, build_daily_summary_message
 from morning_briefer import send_morning_briefing
 from signals.scanner import scan_all
