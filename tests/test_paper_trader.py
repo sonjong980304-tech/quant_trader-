@@ -106,7 +106,7 @@ class TestEvaluatePositions:
 
     def test_tp_exit_price_is_exactly_7pct(self):
         self._setup()
-        closed = pt.evaluate_positions({"005930.KS": self.ENTRY * 1.16})
+        pt.evaluate_positions({"005930.KS": self.ENTRY * 1.16})
         trade  = pt._load(pt.TRADES_PATH, [])[0]
         expected_exit = round(self.ENTRY * 1.15, 4)
         assert trade["exit_price"] == expected_exit

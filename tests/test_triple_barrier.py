@@ -11,7 +11,6 @@ Triple-Barrier 라벨링 단위 테스트.
 
 import sys
 import os
-import pytest
 import numpy as np
 import pandas as pd
 
