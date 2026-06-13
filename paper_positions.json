@@ -3,28 +3,19 @@
     "signal_id": "185dfd31",
     "ticker": "071050.KS",
     "name": "한국금융지주",
-    "entry_price": 229000.0,
+    "entry_price": 237500.0,
     "entry_date": "2026-06-11 15:32:15",
-    "trade_days": 1,
+    "trade_days": 2,
     "highest": 240500.0
   },
   "b7e5262f": {
     "signal_id": "b7e5262f",
     "ticker": "267250.KS",
     "name": "HD현대",
-    "entry_price": 242500.0,
+    "entry_price": 252500.0,
     "entry_date": "2026-06-11 15:32:16",
-    "trade_days": 1,
+    "trade_days": 2,
     "highest": 244000.0
-  },
-  "40dadbd9": {
-    "signal_id": "40dadbd9",
-    "ticker": "100790.KQ",
-    "name": "미래에셋벤처투자",
-    "entry_price": 39450.0,
-    "entry_date": "2026-06-11 15:32:18",
-    "trade_days": 1,
-    "highest": 39450.0
   },
   "c4e273fd": {
     "signal_id": "c4e273fd",

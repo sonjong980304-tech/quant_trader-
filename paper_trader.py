@@ -876,23 +876,53 @@ def update_entry_prices(market: str) -> list[str]:
     tickers   = list({pos["ticker"] for pos in pending.values()})
     open_map: dict[str, float] = {}
 
-    try:
-        import FinanceDataReader as fdr
-        from datetime import date
-        today = date.today().strftime("%Y-%m-%d")
-        for ticker in tickers:
-            try:
-                df = fdr.DataReader(ticker, today)
-                if not df.empty and "Open" in df.columns:
-                    val = float(df["Open"].iloc[-1])
-                    if val > 0:
-                        open_map[ticker] = val
-            except Exception:
-                pass
-    except ImportError:
+    # ── 1순위: KIS API (당일 시가 stck_oprc) — 실매매 로직과 동일한 소스 ──────
+    if market == "KR":
+        try:
+            from config import KIS_APP_KEY
+            from trader import KISTrader
+            if KIS_APP_KEY:
+                t = KISTrader()
+                for ticker in tickers:
+                    try:
+                        code = ticker.replace(".KS", "").replace(".KQ", "")
+                        info = t.get_current_price(code)
+                        val  = float(info.get("open", 0))
+                        if val > 0:
+                            open_map[ticker] = val
+                            logger.info("[Paper] KIS 시초가: %s open=%s", ticker, val)
+                    except Exception as e:
+                        logger.warning("[Paper] KIS 시초가 조회 실패 %s: %s", ticker, e)
+        except Exception as e:
+            logger.warning("[Paper] KIS 초기화 실패, FDR 폴백: %s", e)
+
+    # ── 2순위: FDR (KIS 미조회 종목 또는 US) ─────────────────────────────────
+    remaining = [t for t in tickers if t not in open_map]
+    if remaining:
+        try:
+            import FinanceDataReader as fdr
+            from datetime import date
+            today = date.today().strftime("%Y-%m-%d")
+            for ticker in remaining:
+                try:
+                    code = ticker.replace(".KS", "").replace(".KQ", "")
+                    df = fdr.DataReader(code, today)
+                    if not df.empty and "Open" in df.columns:
+                        val = float(df["Open"].iloc[-1])
+                        if val > 0:
+                            open_map[ticker] = val
+                            logger.info("[Paper] FDR 시초가: %s open=%s", ticker, val)
+                except Exception:
+                    pass
+        except ImportError:
+            pass
+
+    # ── 3순위: yfinance (FDR도 실패한 종목) ──────────────────────────────────
+    remaining = [t for t in tickers if t not in open_map]
+    if remaining:
         try:
             import yfinance as yf
-            for ticker in tickers:
+            for ticker in remaining:
                 try:
                     data = yf.download(ticker, period="1d", progress=False, auto_adjust=True)
                     if not data.empty:
@@ -905,8 +935,11 @@ def update_entry_prices(market: str) -> list[str]:
                         val = float(data["Open"].iloc[-1])
                         if val > 0:
                             open_map[ticker] = val
+                            logger.info("[Paper] yfinance 시초가: %s open=%s", ticker, val)
                 except Exception:
                     pass
+        except ImportError:
+            pass
         except ImportError:
             logger.warning("[Paper] 시초가 조회 라이브러리 없음 (fdr/yf)")
             return []
