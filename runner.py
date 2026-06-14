@@ -581,7 +581,7 @@ def scan_growth_signals_eod():
     def _fetch_eod_only(ticker: str) -> pd.DataFrame:
         return _cached_fetch(ticker)
 
-    signals = scan_all(stocks_to_scan, _fetch_eod_only, is_bear=is_bear)
+    signals = scan_all_graph(stocks_to_scan, _fetch_eod_only, is_bear=is_bear)
     if not signals:
         logger.info("EOD 신호 없음")
         return
