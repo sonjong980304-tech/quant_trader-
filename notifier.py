@@ -36,6 +36,36 @@ def send_telegram(message: str) -> bool:
         return False
 
 
+def send_buy_confirmation_keyboard(text: str, conf_id: str) -> bool:
+    """EOD 매수 신호 확인 메시지를 인라인 키보드(✅/❌)와 함께 전송."""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        logger.warning("텔레그램 토큰 또는 채팅 ID가 설정되지 않았습니다.")
+        return False
+
+    url     = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id":      TELEGRAM_CHAT_ID,
+        "text":         text,
+        "parse_mode":   "HTML",
+        "reply_markup": json.dumps({
+            "inline_keyboard": [[
+                {"text": "✅ 매수 확인", "callback_data": f"buy_confirm_{conf_id}"},
+                {"text": "❌ 취소",      "callback_data": f"buy_cancel_{conf_id}"},
+            ]]
+        }),
+    }
+    try:
+        resp = requests.post(url, json=payload, timeout=10)
+        if resp.status_code == 200:
+            logger.info("매수 확인 키보드 전송 성공 (conf_id=%s)", conf_id)
+            return True
+        logger.error("키보드 전송 실패: %s %s", resp.status_code, resp.text)
+        return False
+    except Exception as e:
+        logger.error("키보드 전송 오류: %s", e)
+        return False
+
+
 # ─────────────────────────────────────────────
 # 매수 / 매도 신호 메시지
 # ─────────────────────────────────────────────
