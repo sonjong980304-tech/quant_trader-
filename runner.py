@@ -575,6 +575,14 @@ def scan_growth_signals_eod():
         stocks_to_scan = STOCKS
 
     held = set(_load_state().get("ml_positions", {}).keys())
+    # LIVE_TRADING=False 시 페이퍼 포지션의 ticker도 중복 신호 차단
+    if not LIVE_TRADING:
+        try:
+            from paper_trader import _load as _pt_load, POS_PATH as _PT_POS
+            _paper_pos = _pt_load(_PT_POS, {})
+            held = held | {v["ticker"] for v in _paper_pos.values()}
+        except Exception as _e:
+            logger.debug("페이퍼 포지션 ticker 로드 실패 (무시): %s", _e)
     stocks_to_scan = {t: n for t, n in stocks_to_scan.items() if t not in held}
 
     # 완성된 일봉만 사용 — 분봉 합성 없음 (학습 시점과 동일한 피처 생성)
