@@ -692,6 +692,13 @@ def scan_growth_signals_eod():
 
 def execute_pending_orders(market: str):
     """장 시작 시 예약 주문 실행. market: 'KR' | 'US'"""
+    if market == "KR" and not is_kr_trading_day(datetime.now(KST).date()):
+        return
+    if market == "US":
+        eastern = pytz.timezone("America/New_York")
+        if datetime.now(KST).astimezone(eastern).weekday() >= 5:
+            return
+
     from pending_orders import pop_pending_orders
     from notifier import send_telegram
 
