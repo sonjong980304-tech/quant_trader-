@@ -379,6 +379,7 @@ _TOOLS = [
     get_yahoo_finance,
     get_naver_news,
     get_stock_signal,
+    get_paper_status,
     list_trade_records,
     edit_trade_record,
     get_historical_price,
