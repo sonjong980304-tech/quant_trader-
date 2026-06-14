@@ -986,6 +986,56 @@ async def cmd_trainmodel(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 # ─────────────────────────────────────────────
+# 매수 확인 인라인 키보드 콜백 핸들러
+# ─────────────────────────────────────────────
+async def callback_buy_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """✅ 매수 확인 / ❌ 취소 버튼 처리."""
+    query = update.callback_query
+    await query.answer()
+    data = query.data or ""
+
+    if data.startswith("buy_confirm_"):
+        conf_id = data[len("buy_confirm_"):]
+        from pending_confirmations import get_confirmation, remove_confirmation
+        from pending_orders import add_pending_order
+
+        conf = get_confirmation(conf_id)
+        if not conf:
+            await query.edit_message_text("⚠️ 이미 처리됐거나 만료된 주문입니다.")
+            return
+
+        order_id = add_pending_order(
+            action  = "BUY",
+            ticker  = conf["ticker"],
+            code    = conf["code"],
+            qty     = conf["qty"],
+            is_us   = conf["is_us"],
+            note    = conf["note"],
+            ml_meta = conf["ml_meta"],
+        )
+        remove_confirmation(conf_id)
+        await query.edit_message_text(
+            f"✅ <b>매수 확정!</b> {conf['name']} ({conf['ticker']}) {conf['qty']}주\n"
+            f"익일 09:00 시초가 예약 완료 (주문 ID: {order_id})",
+            parse_mode="HTML",
+        )
+
+    elif data.startswith("buy_cancel_"):
+        conf_id = data[len("buy_cancel_"):]
+        from pending_confirmations import get_confirmation, remove_confirmation
+
+        conf = get_confirmation(conf_id)
+        if conf:
+            remove_confirmation(conf_id)
+            await query.edit_message_text(
+                f"❌ <b>매수 취소됨</b>: {conf['name']} ({conf['ticker']})",
+                parse_mode="HTML",
+            )
+        else:
+            await query.edit_message_text("이미 처리됐거나 만료된 주문입니다.")
+
+
+# ─────────────────────────────────────────────
 # 봇 실행
 # ─────────────────────────────────────────────
 def main():
