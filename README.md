@@ -485,7 +485,7 @@ quant_trader/
 │   ├── test_triple_barrier.py      # Triple-Barrier 라벨링 단위 테스트
 │   ├── test_paper_trader.py        # 페이퍼 트레이딩 엔진 단위 테스트 (60케이스, V8 2단계 체결 포함)
 │   └── test_position_manager.py    # ML 포지션 추적 단위 테스트 (20케이스)
-├── morning_briefer.py      # 모닝 브리핑
+├── morning_briefer.py      # 모닝 브리핑 (LangGraph 품질 재시도 루프)
 ├── data_fetcher.py         # yfinance 일봉 + KIS 분봉
 ├── indicators.py           # MA / RSI / 볼린저밴드
 ├── strategy.py             # MA/RSI 매수·매도 신호
