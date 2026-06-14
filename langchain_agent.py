@@ -346,6 +346,7 @@ def _build_system_prompt() -> str:
   기술적 분석·매수매도 신호 → get_stock_signal 호출
   뉴스 검색 → get_naver_news 호출
   계좌 잔고·보유 종목 → get_account_balance 호출
+  페이퍼 트레이딩 현황·오픈 포지션·누적 성과 → get_paper_status 호출 (market='KR'|'US'|'all')
   매매 이력 조회 → list_trade_records 호출
   매매 이력 수정 (진입가/청산가/수량/메모 등 변경 요청 시) → edit_trade_record 호출
     ※ trade_id를 모를 경우 종목명(예: "삼성전자")이나 종목코드(예: "005930.KS")를 trade_id에 전달하면 자동 검색
