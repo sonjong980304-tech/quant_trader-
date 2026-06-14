@@ -35,7 +35,7 @@ from strategy import generate_signals, get_latest_signal
 from trader import KISTrader
 from notifier import send_telegram, build_daily_summary_message
 from morning_briefer import send_morning_briefing
-from signals.scanner import scan_all
+from signals.signal_graph import scan_all_graph
 from signals.alert import send_signal_alert
 from market_calendar import is_kr_trading_day
 from market_regime import get_market_regime
