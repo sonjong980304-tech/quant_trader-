@@ -355,12 +355,16 @@ def log_auc(fold_id: int | str, auc: float):
 def get_metrics(market: str | None = None) -> dict:
     """누적 측정 지표 반환. market='KR'|'US'|None(전체)."""
     trades  = _load(TRADES_PATH, [])
-    closed  = [t for t in trades if t["status"] == "closed"]
+    meta    = _load(META_PATH, {})
+    # start_date 이후 기록만 현재 페이퍼 세션으로 집계 (이전 세션 거래 제외)
+    start_date = meta.get("start_date")
+    closed  = [t for t in trades
+               if t["status"] == "closed"
+               and (not start_date or t.get("timestamp", "") >= start_date)]
     if market == "KR":
         closed = [t for t in closed if _is_kr(t["ticker"])]
     elif market == "US":
         closed = [t for t in closed if not _is_kr(t["ticker"])]
-    meta    = _load(META_PATH, {})
 
     if not closed:
         start = meta.get("start_date")
