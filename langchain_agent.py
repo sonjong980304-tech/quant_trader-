@@ -1,29 +1,32 @@
 """
-langchain_agent.py - LangChain 기반 주식 어시스턴트
+langchain_agent.py - LangGraph ReAct 기반 주식 어시스턴트
 
-기존 gpt_agent.py의 툴들을 LangChain Tool 형식으로 래핑.
-ConversationBufferWindowMemory로 대화 기록 유지.
+AgentExecutor → create_react_agent (langgraph.prebuilt) 전환.
+MemorySaver checkpointer로 thread_id(유저별) 대화 이력 분리 관리.
+clear_history()는 generation 카운터를 증가시켜 새 thread로 전환.
 """
 
 import logging
 
 from langchain_openai import ChatOpenAI
-from langchain.agents import AgentExecutor, create_openai_tools_agent
-from langchain.memory import ConversationBufferWindowMemory
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.tools import tool
+from langchain_core.messages import SystemMessage, ToolMessage
+from langgraph.prebuilt import create_react_agent
+from langgraph.checkpoint.memory import MemorySaver
 
 from config import OPENAI_API_KEY, STOCKS, MA_SHORT, MA_LONG
 
 logger = logging.getLogger(__name__)
 
-# 유저별 AgentExecutor 인스턴스 저장
-_agents: dict[int, AgentExecutor] = {}
-_memories: dict[int, ConversationBufferWindowMemory] = {}
+# MemorySaver: thread_id 기반으로 유저별 대화 이력 분리
+_checkpointer      = MemorySaver()
+_react_agent       = None
+# clear_history() 시 generation 증가 → 새 thread_id로 전환
+_thread_generation: dict[int, int] = {}
 
 
 # ─────────────────────────────────────────────
-# LangChain Tools (기존 함수 래핑)
+# LangChain Tools
 # ─────────────────────────────────────────────
 
 @tool
@@ -316,7 +319,7 @@ def _build_system_prompt() -> str:
 
 
 # ─────────────────────────────────────────────
-# Agent 빌더
+# LangGraph ReAct Agent
 # ─────────────────────────────────────────────
 
 _TOOLS = [
@@ -335,44 +338,33 @@ _TOOLS = [
 ]
 
 
-def _build_agent(user_id: int) -> AgentExecutor:
-    llm = ChatOpenAI(
-        model="gpt-5.5",
-        api_key=OPENAI_API_KEY,
-        temperature=0,
-    )
-
-    memory = ConversationBufferWindowMemory(
-        memory_key="chat_history",
-        return_messages=True,
-        k=10,  # 최근 10턴 유지
-    )
-    _memories[user_id] = memory
-
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", _build_system_prompt()),
-        MessagesPlaceholder("chat_history"),
-        ("human", "{input}"),
-        MessagesPlaceholder("agent_scratchpad"),
-    ])
-
-    agent = create_openai_tools_agent(llm, _TOOLS, prompt)
-    return AgentExecutor(
-        agent=agent,
-        tools=_TOOLS,
-        memory=memory,
-        verbose=False,
-        handle_parsing_errors=True,
-        max_iterations=5,
-        return_intermediate_steps=True,
-    )
+def _thread_id(user_id: int) -> str:
+    """유저 ID + generation으로 thread_id 생성. clear_history() 시 generation 증가."""
+    gen = _thread_generation.get(user_id, 0)
+    return f"{user_id}_{gen}"
 
 
-def get_agent(user_id: int) -> AgentExecutor:
-    """유저별 AgentExecutor 싱글턴 반환."""
-    if user_id not in _agents:
-        _agents[user_id] = _build_agent(user_id)
-    return _agents[user_id]
+def _get_react_agent():
+    """create_react_agent 싱글턴 반환 (MemorySaver 공유)."""
+    global _react_agent
+    if _react_agent is None:
+        llm = ChatOpenAI(
+            model="gpt-5.5",
+            api_key=OPENAI_API_KEY,
+            temperature=0,
+        )
+        _react_agent = create_react_agent(
+            model=llm,
+            tools=_TOOLS,
+            prompt=_build_system_prompt(),
+            checkpointer=_checkpointer,
+        )
+    return _react_agent
+
+
+def get_agent(user_id: int):
+    """유저별 agent 반환 (단일 인스턴스, thread_id로 대화 이력 분리)."""
+    return _get_react_agent()
 
 
 # ─────────────────────────────────────────────
@@ -381,33 +373,36 @@ def get_agent(user_id: int) -> AgentExecutor:
 
 def ask(user_id: int, question: str) -> str:
     """
-    LangChain 에이전트로 질문 처리.
-    gpt_agent.ask()와 동일한 시그니처 — telegram_bot.py에서 교체 가능.
+    LangGraph ReAct 에이전트로 질문 처리.
+    thread_id = f"{user_id}_{generation}" 으로 유저별 대화 이력 분리.
     """
     try:
-        agent  = get_agent(user_id)
-        result = agent.invoke({"input": question})
-        answer = result.get("output", "")
+        agent  = _get_react_agent()
+        config = {"configurable": {"thread_id": _thread_id(user_id)}}
+        result = agent.invoke(
+            {"messages": [("human", question)]},
+            config=config,
+        )
+        messages = result.get("messages", [])
+        answer   = messages[-1].content if messages else ""
 
         # Context Recall 평가 (툴 호출이 있었을 때만)
-        if result.get("intermediate_steps"):
-            ctx = "\n\n".join(
-                str(step[1]) for step in result["intermediate_steps"]
-            )
+        tool_msgs = [m for m in messages if isinstance(m, ToolMessage)]
+        if tool_msgs:
+            ctx   = "\n\n".join(m.content for m in tool_msgs)
             score = _eval_recall(ctx, answer)
             return f"{answer}\n\n─────────────────\n📊 Context Recall: {score:.2f}"
 
         return answer
     except Exception as e:
-        logger.error("LangChain 에이전트 오류: %s", e)
+        logger.error("LangGraph 에이전트 오류: %s", e)
         return f"⚠️ 오류: {e}"
 
 
 def clear_history(user_id: int):
-    """대화 기록 초기화."""
-    if user_id in _memories:
-        _memories[user_id].clear()
-    _agents.pop(user_id, None)
+    """대화 기록 초기화 — generation을 증가시켜 새 thread로 전환."""
+    _thread_generation[user_id] = _thread_generation.get(user_id, 0) + 1
+    logger.info("유저 %d 대화 이력 초기화 (thread_id: %s)", user_id, _thread_id(user_id))
 
 
 def _eval_recall(context: str, answer: str) -> float:
