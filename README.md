@@ -496,6 +496,9 @@ quant_trader/
 ├── market_calendar.py      # KRX 영업일 캐시 (주말+공휴일 자동 감지)
 ├── market_regime.py        # KOSPI 시장 상황 필터 (역배열 차단 / 약세장 판정)
 ├── gpt_agent.py            # GPT 툴 함수 (langchain_agent에서 호출)
+├── signals/
+│   ├── signal_graph.py     # LangGraph StateGraph 신호 탐지 파이프라인
+│   ├── scanner.py          # 기술적 트리거 탐지 + ML 에이전트 평가 (signal_graph에서 호출)
 ├── state.json              # 봇 활성화 게이트
 ├── trade_history.csv       # 매매 이력
 ├── ml/
