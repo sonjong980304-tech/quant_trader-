@@ -180,6 +180,58 @@ def cancel_conditional_order(order_id: str) -> str:
 
 
 @tool
+def get_paper_status(market: str = "KR") -> str:
+    """
+    페이퍼 트레이딩 현황을 조회합니다.
+    market: 'KR'(국내, 기본값) | 'US'(미국) | 'all'(전체)
+    - 현재 오픈 포지션 목록과 미실현 손익
+    - 현재 세션 누적 통계 (청산 건수, 승률, 기대수익률)
+    """
+    from paper_trader import get_metrics, _load, POS_PATH, TRADES_PATH
+    import json
+
+    mkt = None if market == "all" else market.upper()
+    m   = get_metrics(mkt)
+
+    positions = _load(POS_PATH, {})
+    trades    = _load(TRADES_PATH, [])
+
+    # 오픈 포지션 필터
+    def _is_kr(t: str) -> bool:
+        return t.endswith(".KS") or t.endswith(".KQ")
+    if mkt == "KR":
+        open_pos = {sid: p for sid, p in positions.items() if _is_kr(p.get("ticker", ""))}
+    elif mkt == "US":
+        open_pos = {sid: p for sid, p in positions.items() if not _is_kr(p.get("ticker", ""))}
+    else:
+        open_pos = positions
+
+    lines = [f"📋 페이퍼 트레이딩 현황 ({market.upper()})"]
+
+    # 오픈 포지션
+    if open_pos:
+        lines.append(f"\n【오픈 포지션 {len(open_pos)}건】")
+        for p in open_pos.values():
+            ep   = p.get("entry_price")
+            cur  = p.get("highest", 0)
+            td   = p.get("trade_days", 0)
+            name = p.get("name", p.get("ticker", ""))
+            ep_str = f"{ep:,.0f}원" if ep else "미확정(익일시초가)"
+            lines.append(f"  • {name}: 진입가={ep_str} | 보유{td}일")
+    else:
+        lines.append("\n【오픈 포지션 없음】")
+
+    # 누적 성과 (현재 세션만)
+    lines.append(f"\n【누적 성과 (세션 시작: {m.get('start_date', '-')})】")
+    lines.append(f"  청산 {m['n']}건 | 승률 {m['win_rate']*100:.1f}% | 기대수익 {m['ev']*100:+.2f}%")
+    if m['n'] > 0:
+        lines.append(f"  CI 95%: [{m['ci_low']*100:+.2f}%, {m['ci_high']*100:+.2f}%]")
+        lines.append(f"  최대연속손실: {m['max_consec_loss']}연패")
+
+    return "\n".join(lines)
+
+
+@tool
 def list_trade_records(status: str = "all") -> str:
     """
     매매 이력 CSV를 조회합니다.
