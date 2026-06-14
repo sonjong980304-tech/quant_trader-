@@ -473,7 +473,8 @@ quant_trader/
 ├── stocks.py               # 관심종목 (STOCKS, US_STOCKS)
 ├── runner.py               # 스케줄러 (07:30 재학습·스캔·리밸런싱·09:05/22:35/23:35 시초가 업데이트)
 ├── telegram_bot.py         # 텔레그램 봇
-├── langchain_agent.py      # LangChain AI 어시스턴트
+├── langchain_agent.py      # LangGraph ReAct AI 어시스턴트 (MemorySaver, thread별 대화 이력)
+├── pending_confirmations.py # EOD 매수 신호 확인 대기 목록 (인라인 키보드 ✅/❌)
 ├── trader.py               # KIS API (국내 + 미국주식)
 ├── trade_logger.py         # 매매 이력 CSV 기록 + 텔레그램 전송
 ├── backtest_ml.py          # 45일 분봉 ML 백테스트
