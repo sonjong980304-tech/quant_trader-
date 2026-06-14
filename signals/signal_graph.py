@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 class SignalState(TypedDict):
     ticker:           str
     name:             str
-    df:               object          # pd.DataFrame
+    df:               Any              # pd.DataFrame
     is_bear:          bool
     triggers:         list[str]
     has_momentum:     bool
@@ -58,6 +58,8 @@ def _node_trigger_detect(state: SignalState) -> SignalState:
         return {**state, "df": df, "triggers": [], "has_momentum": False, "has_reversion": False}
 
     triggers    = detect_triggers(df)
+    if triggers:
+        logger.info("  [%s] 트리거 감지: %s — ML 예측 실행", ticker, triggers)
     trigger_set = set(triggers)
     return {
         **state,
