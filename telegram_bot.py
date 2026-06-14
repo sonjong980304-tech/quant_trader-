@@ -1073,6 +1073,8 @@ def main():
         filters.TEXT & filters.Regex(r"^/buysignal_"),
         cmd_buysignal,
     ))
+    # EOD 매수 확인 인라인 키보드 콜백 (✅/❌)
+    app.add_handler(CallbackQueryHandler(callback_buy_handler, pattern=r"^buy_"))
     # 커맨드가 아닌 일반 텍스트 → GPT (CommandHandler보다 나중에 등록해야 함)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
