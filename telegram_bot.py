@@ -17,7 +17,10 @@ import re
 import subprocess
 import logging
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import (
+    ApplicationBuilder, CommandHandler, MessageHandler,
+    CallbackQueryHandler, filters, ContextTypes,
+)
 
 from config import TELEGRAM_BOT_TOKEN, MA_SHORT, MA_LONG, RSI_PERIOD
 from langchain_agent import ask as gpt_ask, clear_history as gpt_clear
