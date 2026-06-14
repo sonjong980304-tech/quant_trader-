@@ -182,6 +182,11 @@ def check_ml_positions():
     - 현재가 <= stop_price    → 손절 매도
     - 7거래일 경과             → 강제 청산
     """
+    # 주말(토/일)에는 가격 조회 자체를 스킵 — yfinance가 마지막 거래일 종가를
+    # 반환해 TP/SL이 잘못 트리거되는 것을 방지
+    if datetime.now(KST).weekday() >= 5:
+        return
+
     state     = _load_state()
     positions = state.get("ml_positions", {})
     if not positions:
