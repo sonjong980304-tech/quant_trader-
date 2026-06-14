@@ -654,19 +654,23 @@ def scan_growth_signals_eod():
             )
             continue
 
-        order_id = add_pending_order(
-            action  = "BUY",
+        from pending_confirmations import add_confirmation
+        from notifier import send_buy_confirmation_keyboard
+
+        conf_id = add_confirmation(
             ticker  = ticker,
-            code    = code,
+            name    = sig.get("name", ticker),
             qty     = rp_qty,
+            code    = code,
             is_us   = is_us,
-            note    = f"EOD ML 신호 | 승률={sig['win_prob']*100:.1f}%",
             ml_meta = ml_meta,
+            note    = f"EOD ML 신호 | 승률={sig['win_prob']*100:.1f}%",
         )
-        send_telegram(
-            f"📌 [EOD 신호] <b>{sig.get('name', ticker)} ({ticker})</b>\n"
-            f"승률 {sig['win_prob']*100:.1f}% | 수량 {rp_qty}주\n"
-            f"익일 09:00 시초가 자동 매수 예약 (ID: {order_id})"
+        send_buy_confirmation_keyboard(
+            f"🔔 [EOD 매수 신호] <b>{sig.get('name', ticker)} ({ticker})</b>\n"
+            f"승률 {sig['win_prob']*100:.1f}% | 손익비 {sig.get('risk_reward', 0):.2f} | 수량 {rp_qty}주\n"
+            f"익일 09:00 시초가 매수 예약 — 확인하시겠습니까?",
+            conf_id,
         )
 
 
