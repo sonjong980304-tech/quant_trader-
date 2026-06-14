@@ -291,7 +291,9 @@ def _run_paper_evaluate_kr(trade_day: bool = False):
 
 
 def _run_paper_evaluate_kr_eod():
-    """15:30 EOD 전용 — trade_days 1일 증가 + TP/SL 체크."""
+    """15:30 EOD 전용 — trade_days 1일 증가 + TP/SL 체크. 거래일에만 실행."""
+    if not is_kr_trading_day(datetime.now(KST).date()):
+        return
     _run_paper_evaluate_kr(trade_day=True)
 
 
