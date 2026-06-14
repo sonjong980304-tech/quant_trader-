@@ -11,10 +11,12 @@ morning_briefer.py - 평일 오전 8시 자동 모닝 브리핑
 import logging
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import TypedDict
 
 import pytz
 from openai import OpenAI
 from tavily import TavilyClient
+from langgraph.graph import StateGraph, END
 
 from config import STOCKS, OPENAI_API_KEY
 from notifier import send_telegram
