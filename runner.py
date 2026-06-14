@@ -334,6 +334,8 @@ def _run_paper_entry_update(market: str):
     """장 시작 직후 호출 — entry_price=None 포지션에 실제 시초가 확정.
     KR: 09:05 KST, US: ET 09:35 (KST 22:35 서머/23:35 동절기).
     """
+    if market == "KR" and not is_kr_trading_day(datetime.now(KST).date()):
+        return
     try:
         from paper_trader import update_entry_prices
         update_entry_prices(market)
