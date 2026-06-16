@@ -619,7 +619,11 @@ Sample output:
 
 ---
 
-## Backtest Results (Reference)
+## Backtest Results (Reference — Pre-G1 Parameters)
+
+> ⚠️ **Note**: The results below are based on **pre-G1 parameters (before 2026-06-10)**.  
+> Differences from the current G1 strategy: SL `-7%→-6%`, TP `dynamic avg_win→+15% fixed`, signal basis `intraday bars→EOD completed candles`.  
+> The actual G1 performance is measured by the `backtest_walkforward.py` walk-forward result: **net EV +1.468% per trade**.
 
 **45-day intraday backtest** (2026-04-11 ~ 2026-05-26, KRX 200 + S&P 500 100 = 300 stocks)  
 Conditions: AUC ≥ 0.58, win rate ≥ 0.60, EV risk/reward ≥ 1.5 (Platt Scaling calibration not applied)
