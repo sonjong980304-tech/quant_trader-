@@ -619,40 +619,6 @@ Sample output:
 
 ---
 
-## Backtest Results (Reference — Pre-G1 Parameters)
-
-> ⚠️ **Note**: The results below are based on **pre-G1 parameters (before 2026-06-10)**.  
-> Differences from the current G1 strategy: SL `-7%→-6%`, TP `dynamic avg_win→+15% fixed`, signal basis `intraday bars→EOD completed candles`.  
-> The actual G1 performance is measured by the `backtest_walkforward.py` walk-forward result: **net EV +1.468% per trade**.
-
-**45-day intraday backtest** (2026-04-11 ~ 2026-05-26, KRX 200 + S&P 500 100 = 300 stocks)  
-Conditions: AUC ≥ 0.58, win rate ≥ 0.60, EV risk/reward ≥ 1.5 (Platt Scaling calibration not applied)
-
-| Stock | Trades | Win Rate | Risk/Reward | Avg Return |
-|-------|--------|----------|-------------|------------|
-| Wonik IPS (240810.KQ) | 1 | 100.0% | — | +14.46% |
-| Hanjin KAL (180640.KS) | 1 | 100.0% | — | +10.10% |
-| HD Hyundai (267250.KS) | 1 | 100.0% | — | +4.01% |
-| KEPCO (015760.KS) | 2 | 50.0% | 2.09 | +2.70% |
-| Taesung (323280.KQ) | 4 | 25.0% | 8.92 | +7.13% |
-
-**Total: 38 trades | 16 stocks with signals (KRX-weighted)**
-
-> More signals expected after applying Platt Scaling calibration with win rate ≥ 0.60 threshold  
-> Intraday signal detection → buy at next bar open → auto-exit on the conditions below
-
-### Auto-Exit Conditions (checked every 5 minutes)
-
-| Condition | Threshold | Alert |
-|-----------|-----------|-------|
-| ✅ Take Profit | Current price ≥ buy price × (1 + avg_win) | "Take Profit" |
-| 🔴 ATR Stop Loss | Current price ≤ buy price − 2 × ATR(14) | "ATR Stop Loss" |
-| 📉 Trailing Stop | After entering profit zone, −2.5% from high or −1×ATR drop | "Trailing Stop" |
-| ⏰ Time Exit | 7 **KRX trading days** elapsed since buy (excluding holidays) | "Time Exit" |
-
-> **ATR Stop Loss**: Custom stop based on stock-specific volatility instead of a fixed −7%. Wider stop for high-ATR stocks reduces whipsaw exits.  
-> **Trailing Stop**: Tracks the high after entering profit territory to lock in gains.
-
 ---
 
 ## Installation
