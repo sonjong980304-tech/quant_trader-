@@ -1,5 +1,7 @@
 # Quant Automated Trading System
 
+**🌐 Language:** [한국어](README.md) | English
+
 > **Investment Disclaimer**: This program is developed for educational and research purposes only.  
 > The user bears full responsibility for any gains or losses from actual investments.  
 > Past performance does not guarantee future returns.
