@@ -47,7 +47,7 @@
 | Market | Method | Criteria |
 |--------|--------|----------|
 | Korea | **FinanceDataReader** full KOSPI+KOSDAQ | Change rate > 0% + top 100 by trading value |
-| U.S. | Full S&P 500 (503 stocks) | Change rate > 0% + top 50 by volume ratio ≥ 1.5× |
+| U.S. | Full S&P 500 (503 stocks) | Change rate > 0% + volume ratio ≥ 1.5× (all 503 stocks scanned) |
 
 - Volume is normalized to a full-day estimate based on market hours: **Korea (KST 09:00~15:30) / U.S. (ET 09:30~16:00)**
 - Structurally declining stocks are permanently excluded via **blacklist** (`BLACKLIST`)
