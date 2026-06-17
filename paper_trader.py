@@ -295,14 +295,32 @@ def evaluate_positions_auto(trade_day: bool = False) -> list[dict]:
     price_map: dict[str, float] = {}
 
     import yfinance as yf
-    for ticker in tickers:
+    from config import KIS_APP_KEY
+    _kis = None
+    if KIS_APP_KEY:
         try:
-            info  = yf.Ticker(ticker).fast_info
-            price = float(info.last_price or 0)
-            if price > 0:
-                price_map[ticker] = price
+            from trader import KISTrader
+            _kis = KISTrader()
         except Exception:
             pass
+    for ticker in tickers:
+        price = 0.0
+        try:
+            if _kis:
+                if ticker.endswith(".KS") or ticker.endswith(".KQ"):
+                    code = ticker.replace(".KS", "").replace(".KQ", "")
+                    price = float(_kis.get_current_price(code)["price"])
+                else:
+                    price = float(_kis.get_us_current_price(ticker)["price"])
+        except Exception:
+            pass
+        if not price:
+            try:
+                price = float(yf.Ticker(ticker).fast_info.last_price or 0)
+            except Exception:
+                pass
+        if price > 0:
+            price_map[ticker] = price
 
     if not price_map:
         logger.warning("[Paper] 현재가 조회 실패 — 평가 스킵")
