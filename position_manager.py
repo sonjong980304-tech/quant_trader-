@@ -182,10 +182,17 @@ def check_ml_positions():
     - 현재가 <= stop_price    → 손절 매도
     - 7거래일 경과             → 강제 청산
     """
-    # 주말(토/일)에는 가격 조회 자체를 스킵 — yfinance가 마지막 거래일 종가를
-    # 반환해 TP/SL이 잘못 트리거되는 것을 방지
-    if datetime.now(KST).weekday() >= 5:
-        return
+    # KST 주말(토/일)에는 기본 스킵 — 단, 일요일 밤 KST = 미국 월요일 장 시작이므로
+    # US 장이 열려있으면 계속 실행 (일요일 밤 KST에 US 포지션 TP/SL 체크 필요)
+    now_kst = datetime.now(KST)
+    if now_kst.weekday() >= 5:
+        import pytz as _pytz
+        _eastern = _pytz.timezone("America/New_York")
+        _now_et  = now_kst.astimezone(_eastern)
+        _et_min  = _now_et.hour * 60 + _now_et.minute
+        _us_open = (_now_et.weekday() < 5) and (9 * 60 + 30 <= _et_min < 16 * 60)
+        if not _us_open:
+            return
 
     state     = _load_state()
     positions = state.get("ml_positions", {})
