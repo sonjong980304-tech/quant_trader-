@@ -147,16 +147,19 @@ def save_ml_position(ticker: str, name: str, qty: int, entry_price: float,
 
 
 def _get_current_price(ticker: str):
-    """현재가 조회 (한국 주식: KIS API, 미국 주식: yfinance)."""
-    if KIS_APP_KEY and (ticker.endswith(".KS") or ticker.endswith(".KQ")):
+    """현재가 조회 — KR: KIS API, US: KIS API 우선 → yfinance fallback."""
+    if KIS_APP_KEY:
         try:
-            code = ticker.replace(".KS", "").replace(".KQ", "")
-            return float(KISTrader().get_current_price(code)["price"])
+            t = KISTrader()
+            if ticker.endswith(".KS") or ticker.endswith(".KQ"):
+                code = ticker.replace(".KS", "").replace(".KQ", "")
+                return float(t.get_current_price(code)["price"])
+            else:
+                return float(t.get_us_current_price(ticker)["price"])
         except Exception:
             pass
     try:
-        info = yf.Ticker(ticker).fast_info
-        return float(info["lastPrice"])
+        return float(yf.Ticker(ticker).fast_info["lastPrice"])
     except Exception:
         return None
 
