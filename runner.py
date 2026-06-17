@@ -687,6 +687,136 @@ def scan_growth_signals_eod():
 
 
 # ─────────────────────────────────────────────
+# US EOD 신호 스캔 (미국 장 마감 직후)
+# ─────────────────────────────────────────────
+
+def scan_growth_signals_eod_us():
+    """
+    05:05 / 06:05 실행 — 미국 장 마감(ET 16:00) 후 EOD 일봉으로 신호 탐지, 당일 밤 시초가 예약.
+    서머타임(KST 05:00) / 동절기(KST 06:00) 양쪽에 등록,
+    내부에서 ET 16:00~17:00 창에서만 실행 (이중 등록 중복 방지).
+    """
+    if not _check_activation():
+        return
+    eastern = pytz.timezone("America/New_York")
+    now_et  = datetime.now(KST).astimezone(eastern)
+    if now_et.weekday() >= 5:
+        return
+    et_min = now_et.hour * 60 + now_et.minute
+    if not (16 * 60 <= et_min < 17 * 60):
+        return
+
+    logger.info("US EOD 신호 스캔 시작 (%s ET)", now_et.strftime("%H:%M"))
+
+    from signals.us_universe import get_us_candidates
+    stocks_to_scan = get_us_candidates(top_n=50)
+    if not stocks_to_scan:
+        logger.info("US 유니버스 스크리닝 결과 없음")
+        return
+
+    held = set(_load_state().get("ml_positions", {}).keys())
+    if not LIVE_TRADING:
+        try:
+            from paper_trader import _load as _pt_load, POS_PATH as _PT_POS
+            _paper_pos = _pt_load(_PT_POS, {})
+            held = held | {v["ticker"] for v in _paper_pos.values()}
+        except Exception as _e:
+            logger.debug("페이퍼 포지션 ticker 로드 실패 (무시): %s", _e)
+    stocks_to_scan = {t: n for t, n in stocks_to_scan.items() if t not in held}
+
+    def _fetch_eod_only(ticker: str) -> pd.DataFrame:
+        return _cached_fetch(ticker)
+
+    signals = scan_all_graph(stocks_to_scan, _fetch_eod_only, is_bear=False)
+    if not signals:
+        logger.info("US EOD 신호 없음")
+        return
+
+    logger.info("US EOD 신호 %d개 발생", len(signals))
+
+    total_asset = 0.0
+    if KIS_APP_KEY:
+        try:
+            total_asset = _get_total_asset(KISTrader())
+        except Exception:
+            pass
+    growth_cash = (total_asset * GROWTH_ASSET_RATIO) if total_asset > 0 else 10_000_000 * GROWTH_ASSET_RATIO
+
+    for sig in signals:
+        ticker = sig["ticker"]
+        atr    = sig.get("atr", 0)
+
+        if atr > 0 and total_asset > 0:
+            risk_usd = (total_asset * 0.01) / 1400
+            rp_qty   = max(1, int(risk_usd / (2.0 * atr)))
+        else:
+            close  = max(sig.get("current_price", 10), 1)
+            rp_qty = max(1, int((growth_cash * 0.02) / (close * 1400)))
+
+        ml_meta = {
+            "avg_win":  sig["avg_win"],
+            "avg_loss": sig["avg_loss"],
+            "atr":      atr,
+            "is_us":    True,
+            "win_prob": sig["win_prob"],
+            "agent":    sig.get("agent", ""),
+        }
+
+        if not LIVE_TRADING:
+            logger.warning("[LIVE_TRADING=False] US EOD 페이퍼: %s 승률=%.1f%%",
+                           ticker, sig["win_prob"] * 100)
+            try:
+                from paper_trader import log_paper_signal, is_circuit_breaker_active
+                if not is_circuit_breaker_active():
+                    _ep_eod = float(sig.get("current_price") or 0.0)
+                    log_paper_signal(
+                        ticker           = ticker,
+                        name             = sig.get("name", ticker),
+                        agent            = sig.get("agent", "eod"),
+                        trigger_types    = sig.get("trigger_types", []),
+                        win_prob         = sig["win_prob"],
+                        avg_win          = sig["avg_win"],
+                        avg_loss         = sig["avg_loss"],
+                        rr               = sig.get("risk_reward", 0.0),
+                        regime_prob      = sig.get("regime_prob"),
+                        regime_pass      = True,
+                        entry_price      = None,
+                        actual_price     = None,
+                        position_size_pct= 0.0,
+                        kelly_fraction   = None,
+                        auc_at_signal    = sig.get("model_auc"),
+                        eod_close        = _ep_eod,
+                    )
+            except Exception as _pe:
+                logger.warning("[Paper] US EOD 신호 기록 실패: %s", _pe)
+            send_telegram(
+                f"📋 [페이퍼/US EOD] <b>{sig.get('name', ticker)} ({ticker})</b>\n"
+                f"승률 {sig['win_prob']*100:.1f}% | 손익비 {sig.get('risk_reward',0):.2f}\n"
+                f"<i>GATE A·B·C 미통과 — 실주문 차단</i>"
+            )
+            continue
+
+        from pending_confirmations import add_confirmation
+        from notifier import send_buy_confirmation_keyboard
+
+        conf_id = add_confirmation(
+            ticker  = ticker,
+            name    = sig.get("name", ticker),
+            qty     = rp_qty,
+            code    = ticker,
+            is_us   = True,
+            ml_meta = ml_meta,
+            note    = f"US EOD ML 신호 | 승률={sig['win_prob']*100:.1f}%",
+        )
+        send_buy_confirmation_keyboard(
+            f"🔔 [US EOD 매수 신호] <b>{sig.get('name', ticker)} ({ticker})</b>\n"
+            f"승률 {sig['win_prob']*100:.1f}% | 손익비 {sig.get('risk_reward', 0):.2f} | 수량 {rp_qty}주\n"
+            f"당일 22:30·23:30 시초가 매수 예약 — 확인하시겠습니까?",
+            conf_id,
+        )
+
+
+# ─────────────────────────────────────────────
 # 월간 리밸런싱
 # ─────────────────────────────────────────────
 
