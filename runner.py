@@ -709,7 +709,7 @@ def scan_growth_signals_eod_us():
     logger.info("US EOD 신호 스캔 시작 (%s ET)", now_et.strftime("%H:%M"))
 
     from signals.us_universe import get_us_candidates
-    stocks_to_scan = get_us_candidates(top_n=50)
+    stocks_to_scan = get_us_candidates(top_n=503)
     if not stocks_to_scan:
         logger.info("US 유니버스 스크리닝 결과 없음")
         return
