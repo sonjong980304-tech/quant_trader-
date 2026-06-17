@@ -289,7 +289,7 @@ return round(min(MAX_KELLY, max(0.0, f_half)), 4)
 |------|--------|
 | 07:30 (trading days) | Parallel ML model retraining on KRX top-200 universe (outside market hours, 5-year daily data) |
 | 22:30 / 23:30 (weekdays) | S&P 500 top-100 universe ML model retraining (auto-branching DST/standard, runs only in ET 09:30~10:00 window) |
-| 08:00 (trading days) | Morning briefing (news on holdings + market overview) |
+| 08:00 (trading days) | Morning briefing — S&P 500 / Nasdaq / Dow Jones fetched directly via yfinance (injected into prompt to prevent AI hallucination) + Tavily news + LangGraph quality retry loop |
 | 08:30 (1st of month, trading days) | Safe asset Monte Carlo rebalancing |
 | 09:00 (trading days) | KR pending order execution — next-day open buy based on EOD signal |
 | **09:05 (trading days)** | **KR paper open price confirmation** — `update_entry_prices("KR")` queries actual Open via FinanceDataReader; confirms `entry_price=None` positions |
