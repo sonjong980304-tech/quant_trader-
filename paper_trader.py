@@ -711,8 +711,19 @@ def daily_report(market: str | None = None) -> str:
         entry = pos.get("entry_price")
         if entry:
             try:
-                import yfinance as yf
-                cur = yf.Ticker(pos["ticker"]).fast_info.last_price or 0
+                from config import KIS_APP_KEY
+                cur = 0.0
+                if KIS_APP_KEY:
+                    from trader import KISTrader
+                    _kt = KISTrader()
+                    _tk = pos["ticker"]
+                    if _tk.endswith(".KS") or _tk.endswith(".KQ"):
+                        cur = float(_kt.get_current_price(_tk.replace(".KS","").replace(".KQ",""))["price"])
+                    else:
+                        cur = float(_kt.get_us_current_price(_tk)["price"])
+                if not cur:
+                    import yfinance as yf
+                    cur = yf.Ticker(pos["ticker"]).fast_info.last_price or 0
                 pnl = (cur - entry) / entry * 100
                 arrow = "▲" if pnl >= 0 else "▼"
                 lines.append(
