@@ -297,6 +297,7 @@ return round(min(MAX_KELLY, max(0.0, f_half)), 4)
 | **15:31 (trading days)** | **EOD signal scan** — signal detection on completed daily candles after close → next-day open order scheduled (GATE B, Train/Serve Skew eliminated) |
 | 22:30 / 23:30 (weekdays) | US pending order execution — next-day open buy based on EOD signal (auto-branching DST/standard) |
 | **22:35 / 23:35 (weekdays)** | **US paper open price confirmation** — `update_entry_prices("US")` (auto-branching DST/standard) |
+| **05:20 / 06:20 (weekdays)** | **US EOD signal scan** — 20 min after U.S. market close, full S&P 500 (503 stocks) EOD candle scan → next-session open price reservation (auto-branching DST/standard) |
 | 15:00 (trading days) | Daily technical analysis report |
 | **15:35 (daily)** | **KR paper trading daily report** (immediately after Korean market close, sent via Telegram) |
 | **05:30 / 06:30 (daily)** | **US paper trading daily report** (immediately after U.S. market close, auto-branching DST/standard, once per day) |

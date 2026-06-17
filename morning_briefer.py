@@ -65,8 +65,28 @@ def _get_holding_names() -> list[str]:
     return list(STOCKS.values())
 
 
+def _get_us_indices() -> str:
+    """yfinance로 S&P 500 / 나스닥 / 다우존스 최근 거래일 종가 및 등락률 직접 조회."""
+    import yfinance as yf
+    indices = [("S&P 500", "^GSPC"), ("나스닥 종합", "^IXIC"), ("다우존스", "^DJI")]
+    lines = []
+    for name, ticker in indices:
+        try:
+            hist = yf.Ticker(ticker).history(period="5d")
+            if len(hist) >= 2:
+                prev  = float(hist["Close"].iloc[-2])
+                last  = float(hist["Close"].iloc[-1])
+                chg   = (last - prev) / prev * 100
+                date  = hist.index[-1].strftime("%Y-%m-%d")
+                arrow = "▲" if chg >= 0 else "▼"
+                lines.append(f"{name} ({date}): {last:,.2f} ({arrow}{abs(chg):.2f}%)")
+        except Exception as e:
+            lines.append(f"{name}: 조회 실패 ({e})")
+    return "\n".join(lines) if lines else "지수 조회 실패"
+
+
 def _gather_context() -> dict:
-    """미국 증시 / 보유종목 뉴스 / 경제 캘린더를 병렬 검색"""
+    """미국 증시 / 보유종목 뉴스 / 경제 캘린더를 병렬 검색 + 실제 지수 데이터 직접 조회"""
     now        = datetime.now(KST)
     from datetime import timedelta
     us_date    = (now - timedelta(days=1)).strftime("%B %d %Y")
@@ -92,6 +112,9 @@ def _gather_context() -> dict:
             except Exception as e:
                 logger.warning("검색 실패 (%s): %s", key, e)
                 context[key] = "검색 결과 없음"
+
+    # 실제 지수 수치 직접 조회 (AI hallucination 방지)
+    context["us_indices"] = _get_us_indices()
 
     return context
 
