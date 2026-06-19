@@ -311,6 +311,19 @@ def run_walkforward(stocks: dict | None = None) -> str:
 
     logger.info("=== Walk-forward 백테스트 시작 (%d종목) ===", len(stocks))
 
+    # KOSPI 일봉 데이터 사전 로드 (kospi_relative 피처 계산용)
+    _kospi_df: pd.DataFrame | None = None
+    try:
+        import yfinance as _yf
+        _kraw = _yf.download("^KS11", start="2018-01-01", progress=False, auto_adjust=True)
+        if hasattr(_kraw.columns, "levels"):
+            _kraw.columns = _kraw.columns.get_level_values(0)
+        if not _kraw.empty:
+            _kospi_df = _kraw[["Close"]].copy()
+            logger.info("KOSPI 데이터 로드 완료 (%d행)", len(_kospi_df))
+    except Exception as _ke:
+        logger.warning("KOSPI 데이터 로드 실패 (kospi_relative NaN 처리): %s", _ke)
+
     all_trades: list[dict] = []
 
     for ticker, name in stocks.items():
@@ -326,7 +339,7 @@ def run_walkforward(stocks: dict | None = None) -> str:
             continue
 
         logger.info("[%s] walk-forward 시작...", ticker)
-        trades = walkforward_ticker(ticker, df)
+        trades = walkforward_ticker(ticker, df, kospi_df=_kospi_df)
         logger.info("[%s] %d건 완료", ticker, len(trades))
         all_trades.extend(trades)
 
