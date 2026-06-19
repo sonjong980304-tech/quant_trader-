@@ -109,6 +109,14 @@ def retrain_daily(market: str = "all", period: str = "5y") -> dict:
 
     logger.info("다운로드 완료: %d / %d개", len(data), len(tickers))
 
+    # ── KOSPI 기준지수 다운로드 (kospi_relative_5d/20d 피처 계산용) ────────────
+    try:
+        kospi_df_shared = _fetch("^KS11", period)
+        logger.info("KOSPI 기준지수 다운로드 완료: %d행", len(kospi_df_shared))
+    except Exception as e:
+        logger.warning("KOSPI 다운로드 실패(%s) → kospi_relative_5d=NaN", e)
+        kospi_df_shared = None
+
     # ── 2단계: 모델 학습 (병렬) ─────────────────────────────────────
     # 학습은 각 스레드가 독립된 DataFrame을 사용하므로 병렬 안전
     logger.info("2단계: 모델 학습 (병렬 8스레드)")
@@ -120,7 +128,7 @@ def retrain_daily(market: str = "all", period: str = "5y") -> dict:
         best_metrics = None
         for agent in ("momentum", "reversion"):
             try:
-                _, metrics = train(df, ticker, agent=agent)
+                _, metrics = train(df, ticker, agent=agent, kospi_df=kospi_df_shared)
                 logger.info("  [OK] %s [%s] acc=%.3f auc=%.3f",
                             ticker, agent, metrics["accuracy"], metrics["auc"])
                 if best_metrics is None or metrics["auc"] > best_metrics["auc"]:
