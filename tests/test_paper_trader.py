@@ -577,7 +577,7 @@ class TestTwoStageEntry:
 
     def test_update_entry_prices_sets_entry(self, monkeypatch):
         """update_entry_prices: FDR 모킹으로 entry_price=None → 실제 Open으로 확정."""
-        import types, sys
+        import types, sys, config
         import pandas as pd
 
         open_price = 82000.0
@@ -588,6 +588,7 @@ class TestTwoStageEntry:
 
         _mock_fdr.DataReader = _mock_datareader
         monkeypatch.setitem(sys.modules, "FinanceDataReader", _mock_fdr)
+        monkeypatch.setattr(config, "KIS_APP_KEY", "")  # KIS 비활성화 → FDR 폴백
 
         _signal(entry=None, eod_close=80000.0)
         updated = pt.update_entry_prices("KR")
