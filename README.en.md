@@ -210,7 +210,7 @@ Final qty       = min(Half-Kelly qty, Risk Parity qty)
 
 | Time | Action |
 |------|--------|
-| 07:30 (trading days) | KRX top-200 universe XGBoost parallel retraining |
+| 07:30 (trading days) | XGBoost parallel retraining on universe filtered by change rate > 0% + top 100 by trading value |
 | 08:00 (trading days) | Morning briefing — AI market overview + news |
 | 09:00 (trading days) | KR pending order execution — next-day open buy based on EOD signal |
 | **09:05 (trading days)** | **KR paper open price confirmation** — `update_entry_prices("KR")` |
@@ -357,7 +357,7 @@ Built with `create_react_agent` (langgraph.prebuilt) + `MemorySaver` checkpointe
        │    │   MemorySaver checkpointer — per-user thread_id       │
        │    └───────────────────────────────────────────────────────┘
        │
-       ├── [07:30] ml/trainer.py — KRX 200 universe XGBoost parallel retraining
+       ├── [07:30] ml/trainer.py — XGBoost parallel retraining (change rate > 0% + top 100 by trading value)
        │
        ├── [08:00] morning_briefer.py — holdings news + market overview
        │
