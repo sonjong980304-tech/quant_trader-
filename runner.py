@@ -529,7 +529,7 @@ def scan_growth_signals_eod():
         )
 
     # ── trend 에이전트 스캔 (ADX≥25 + MA정배열 + 거래량>1.3x) ──────────────────
-    if not LIVE_TRADING and _trend_allowed:
+    if _trend_allowed:
         try:
             from trend_agent import compute_indicators as _ti_compute
             from paper_trader import (
@@ -556,21 +556,45 @@ def scan_growth_signals_eod():
                         _vma = float(_r.get("vol_ma20") or 0)
                         if _vma == 0 or float(_r["Volume"]) < _vma * 1.3:
                             continue
-                        _lps(
-                            ticker        = _tk,
-                            name          = _tn,
-                            agent         = "trend",
-                            trigger_types = ["trend_entry"],
-                            entry_price   = None,
-                            eod_close     = float(_r["Close"]),
-                            atr_at_entry  = float(_r["atr"]),
-                        )
-                        logger.info("[Trend] 신호: %s ADX=%.1f", _tk, float(_r["adx"]))
-                        send_telegram(
-                            f"📈 [페이퍼/Trend] <b>{_tn} ({_tk})</b>\n"
-                            f"ADX={float(_r['adx']):.1f} | ATR={float(_r['atr']):.0f} | MA정배열 ✅\n"
-                            f"익일 09:00 시초가 진입 예약"
-                        )
+                        _atr   = float(_r["atr"])
+                        _close = float(_r["Close"])
+                        _adx   = float(_r["adx"])
+                        if not LIVE_TRADING:
+                            _lps(
+                                ticker        = _tk,
+                                name          = _tn,
+                                agent         = "trend",
+                                trigger_types = ["trend_entry"],
+                                entry_price   = None,
+                                eod_close     = _close,
+                                atr_at_entry  = _atr,
+                            )
+                            logger.info("[Trend] 페이퍼 신호: %s ADX=%.1f", _tk, _adx)
+                            send_telegram(
+                                f"📈 [페이퍼/Trend] <b>{_tn} ({_tk})</b>\n"
+                                f"ADX={_adx:.1f} | ATR={_atr:.0f} | MA정배열 ✅\n"
+                                f"익일 09:00 시초가 진입 예약"
+                            )
+                        else:
+                            from pending_confirmations import add_confirmation
+                            from notifier import send_buy_confirmation_keyboard
+                            _rp_qty = max(1, int((total_asset * 0.01) / (2.0 * _atr))) if _atr > 0 and total_asset > 0 else max(1, int(growth_cash * 0.02 / _close))
+                            _conf_id = add_confirmation(
+                                ticker  = _tk,
+                                name    = _tn,
+                                qty     = _rp_qty,
+                                code    = _tk.replace(".KS", "").replace(".KQ", ""),
+                                is_us   = False,
+                                ml_meta = {"atr": _atr, "agent": "trend", "avg_win": 0.0, "avg_loss": 0.0, "win_prob": 0.0, "is_us": False},
+                                note    = f"Trend 신호 | ADX={_adx:.1f}",
+                            )
+                            send_buy_confirmation_keyboard(
+                                f"🔔 [EOD Trend] <b>{_tn} ({_tk})</b>\n"
+                                f"ADX={_adx:.1f} | ATR={_atr:.0f} | MA정배열 ✅\n"
+                                f"익일 09:00 시초가 매수 예약 — 확인하시겠습니까?",
+                                _conf_id,
+                            )
+                            logger.info("[Trend] 실매매 확인 요청: %s ADX=%.1f", _tk, _adx)
                     except Exception as _te:
                         logger.debug("trend 종목 스캔 실패 %s: %s", _tk, _te)
         except Exception as _trend_err:
