@@ -139,24 +139,14 @@ def train(df: pd.DataFrame, ticker: str, agent: str = "") -> tuple[object, dict]
     )
     final_model.fit(X_final_tr, y_final_tr)
 
-    # Platt Scaling 캘리브레이션 — 홀드아웃 사용 (final_model이 학습에 포함하지 않은 데이터)
-    from sklearn.calibration import CalibratedClassifierCV
-    from sklearn.frozen import FrozenEstimator
+    # Platt Scaling 미적용 — raw XGBoost 확률 사용
+    calibrated_model = final_model
     brier_raw = np.nan
     brier_cal = np.nan
     if len(X_calib) >= 20:
         proba_raw = final_model.predict_proba(X_calib)[:, 1]
         brier_raw = float(brier_score_loss(y_calib, proba_raw))
-
-        calibrated_model = CalibratedClassifierCV(
-            FrozenEstimator(final_model), method="sigmoid"
-        )
-        calibrated_model.fit(X_calib, y_calib)
-
-        proba_cal = calibrated_model.predict_proba(X_calib)[:, 1]
-        brier_cal = float(brier_score_loss(y_calib, proba_cal))
-    else:
-        calibrated_model = final_model
+        brier_cal = brier_raw
 
     # OOF 메트릭 — TimeSeriesSplit 첫 구간은 validation에 포함되지 않아
     # oof_proba가 초기값 0.0으로 남으므로 실제 예측된 인덱스만 사용
