@@ -134,6 +134,7 @@ def log_paper_signal(
     kelly_fraction: float | None = None,
     auc_at_signal: float | None = None,
     eod_close: float | None = None,
+    atr_at_entry: float = 0.0,
 ) -> str:
     """
     신호 기록. signal_id 반환.
@@ -197,11 +198,12 @@ def log_paper_signal(
         "ticker":      ticker,
         "name":        name,
         "agent":       agent,
-        "entry_price": entry_price,   # None 허용 — update_entry_prices()로 확정
-        "eod_close":   _eod_close,
-        "entry_date":  now,
-        "trade_days":  0,
-        "highest":     entry_price or 0.0,
+        "entry_price":  entry_price,   # None 허용 — update_entry_prices()로 확정
+        "eod_close":    _eod_close,
+        "entry_date":   now,
+        "trade_days":   0,
+        "highest":      entry_price or 0.0,
+        "atr_at_entry": atr_at_entry,  # trend trailing stop용
     }
     _save(POS_PATH, positions)
 
