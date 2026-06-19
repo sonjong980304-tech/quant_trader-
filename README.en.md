@@ -47,7 +47,7 @@ Paper test period: started 2026-06-19 (2-week target)
 - Position sizing: Half-Kelly + ATR (calculated independently per agent)
 - Max single position: 20%
 - Regime filter: trend agent only — entry allowed only when KOSPI close > KOSPI MA200
-  (reversion agent has no filter — designed to capture oversold bounces even in downtrends)
+  (reversion agent has no filter — designed to capture oversold bounces even in downtrends / SL -8% handles downside risk)
 
 ---
 
@@ -58,6 +58,7 @@ Paper test period: started 2026-06-19 (2-week target)
 - De Bondt & Thaler (1985), "Does the Stock Market Overreact?", Journal of Finance — empirically demonstrates that investor overreaction causes sharp declines to rebound.
 - Gu, Kelly & Xiu (2020), "Empirical Asset Pricing via Machine Learning", Review of Financial Studies — shows non-linear tree models like XGBoost dominate linear models in return prediction.
 - arXiv:2601.19504 (2026), "Generating Alpha: A Hybrid AI-Driven Trading System", Springer LNNS — RSI/Bollinger Band mean-reversion + XGBoost + regime filter combination achieves +135% over 24 months.
+- López de Prado (2018), "Advances in Financial Machine Learning", Wiley — source of Triple-Barrier labeling methodology. Combines time barrier, TP, and SL to generate non-linear labels; now a standard technique in financial ML.
 
 ### Trend Following
 
