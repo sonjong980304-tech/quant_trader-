@@ -521,6 +521,54 @@ def scan_growth_signals_eod():
             conf_id,
         )
 
+    # ── trend 에이전트 스캔 (ADX≥25 + MA정배열 + 거래량>1.3x) ──────────────────
+    if not LIVE_TRADING and _trend_allowed:
+        try:
+            from trend_agent import compute_indicators as _ti_compute
+            from paper_trader import (
+                log_paper_signal as _lps,
+                can_add_position as _cap,
+                is_circuit_breaker_active as _icba,
+            )
+            if not _icba():
+                for _tk, _tn in stocks_to_scan.items():
+                    if not _cap("trend"):
+                        break
+                    try:
+                        _df = _fetch_eod_only(_tk)
+                        if _df is None or len(_df) < 210:
+                            continue
+                        _df = _ti_compute(_df)
+                        _r = _df.iloc[-1]
+                        if any(pd.isna(_r.get(c)) for c in ["adx", "ma5", "ma20", "ma60", "ma200", "atr"]):
+                            continue
+                        if float(_r["adx"]) < 25:
+                            continue
+                        if not (float(_r["ma5"]) > float(_r["ma20"]) > float(_r["ma60"]) > float(_r["ma200"])):
+                            continue
+                        _vma = float(_r.get("vol_ma20") or 0)
+                        if _vma == 0 or float(_r["Volume"]) < _vma * 1.3:
+                            continue
+                        _lps(
+                            ticker        = _tk,
+                            name          = _tn,
+                            agent         = "trend",
+                            trigger_types = ["trend_entry"],
+                            entry_price   = None,
+                            eod_close     = float(_r["Close"]),
+                            atr_at_entry  = float(_r["atr"]),
+                        )
+                        logger.info("[Trend] 신호: %s ADX=%.1f", _tk, float(_r["adx"]))
+                        send_telegram(
+                            f"📈 [페이퍼/Trend] <b>{_tn} ({_tk})</b>\n"
+                            f"ADX={float(_r['adx']):.1f} | ATR={float(_r['atr']):.0f} | MA정배열 ✅\n"
+                            f"익일 09:00 시초가 진입 예약"
+                        )
+                    except Exception as _te:
+                        logger.debug("trend 종목 스캔 실패 %s: %s", _tk, _te)
+        except Exception as _trend_err:
+            logger.warning("trend 신호 스캔 오류: %s", _trend_err)
+
 
 # ─────────────────────────────────────────────
 # US EOD 신호 스캔 (미국 장 마감 직후)
