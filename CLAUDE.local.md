@@ -20,7 +20,6 @@
 - `langchain_agent.py` — LangChain AI 어시스턴트
 - `trader.py` — KIS API (국내)
 - `com.quant.telegrambot.plist` — 텔레그램 봇 launchd 설정
-- `com.quant.dashboard.plist` — 대시보드 launchd 설정
 
 ## 주의사항
 - launchd plist는 `~/Library/LaunchAgents/`에 심볼릭 링크 또는 복사되어 있어야 함
