@@ -58,6 +58,7 @@ LIVE_TRADING = False  (페이퍼 트레이딩 중)
 - De Bondt & Thaler (1985), "Does the Stock Market Overreact?", Journal of Finance — 투자자 과잉반응으로 급락 종목 반등 실증. reversion 전략 학술 근거.
 - Gu, Kelly & Xiu (2020), "Empirical Asset Pricing via Machine Learning", Review of Financial Studies — XGBoost 등 비선형 트리 모델이 수익률 예측에서 선형 모델 압도 실증.
 - arXiv:2601.19504 (2026), "Generating Alpha: A Hybrid AI-Driven Trading System", Springer LNNS — RSI/볼린저밴드 평균회귀 + XGBoost + 레짐 필터 결합, 24개월 +135% 달성.
+- López de Prado (2018), "Advances in Financial Machine Learning", Wiley — Triple-Barrier 라벨링 방법론 출처. 시간 배리어·TP·SL을 결합해 비선형 레이블을 생성, 금융 ML의 표준 기법으로 자리잡음.
 
 ### Trend Following
 
