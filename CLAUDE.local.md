@@ -18,7 +18,7 @@
 - `runner.py` — EOD 스케줄러 (15:31 KR EOD 신호 스캔, reversion+trend 슬롯분리 운용)
 - `telegram_bot.py` — 텔레그램 봇
 - `langchain_agent.py` — LangChain AI 어시스턴트
-- `trader.py` — KIS API (국내 + 미국주식)
+- `trader.py` — KIS API (국내)
 - `com.quant.telegrambot.plist` — 텔레그램 봇 launchd 설정
 - `com.quant.dashboard.plist` — 대시보드 launchd 설정
 

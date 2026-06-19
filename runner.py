@@ -1,12 +1,12 @@
 """
-runner.py - ML 급등주 전략 스케줄러
+runner.py - Reversion + Trend 슬롯분리 전략 스케줄러
 
 스케줄:
-  15:31   → scan_growth_signals_eod() : KR EOD ML 신호 스캔 → 익일 시초가 매수
-  05:20 / 06:20 → scan_growth_signals_eod_us() : US EOD ML 신호 스캔
+  07:30   → retrain_kr_models()
   08:00   → send_morning_briefing()
-  08:30   → run_monthly_rebalance() (매월 1일)
+  09:00   → execute_pending_orders("KR")
   15:00   → send_daily_summary()
+  15:31   → scan_growth_signals_eod() : KR EOD ML 신호 스캔 → 익일 시초가 매수
 """
 
 import schedule
