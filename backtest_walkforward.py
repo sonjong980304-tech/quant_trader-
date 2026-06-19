@@ -40,6 +40,7 @@ from config import (
     ML_MIN_RISK_REWARD as MIN_RR,
     TP_PCT,
     SL_PCT,
+    EOD_HORIZON,
 )
 
 warnings.filterwarnings("ignore")
@@ -67,7 +68,7 @@ STEP_MONTHS    = 3         # 슬라이딩 스텝 (개월)
 MIN_AUC        = 0.58
 
 # Triple-Barrier
-HORIZON        = 7         # 최대 보유 거래일
+HORIZON        = EOD_HORIZON  # 최대 보유 거래일 (config 단일 진실 소스)
 ATR_MULT       = 2.0       # ATR 기반 SL 승수 (2×ATR)
 
 
