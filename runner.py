@@ -471,8 +471,9 @@ def scan_growth_signals_eod():
             logger.warning("[LIVE_TRADING=False] EOD 페이퍼: %s 승률=%.1f%%",
                            ticker, sig["win_prob"] * 100)
             try:
-                from paper_trader import log_paper_signal, is_circuit_breaker_active
-                if not is_circuit_breaker_active():
+                from paper_trader import log_paper_signal, is_circuit_breaker_active, can_add_position
+                _agent = sig.get("agent", "reversion")
+                if not is_circuit_breaker_active() and can_add_position(_agent):
                     # 익일 시초가 진입 — EOD 종가는 eod_close로 저장, entry_price는 09:05에 확정
                     _ep_eod = float(sig.get("current_price") or 0.0)
                     log_paper_signal(
