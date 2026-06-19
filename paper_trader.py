@@ -201,7 +201,7 @@ def log_paper_signal(
     trades.append(record)
     _save(TRADES_PATH, trades)
 
-    # 포지션 추가
+    # 포지션 추가 (방어 체크에서 이미 로드된 positions 재사용)
     positions = _load(POS_PATH, {})
     positions[signal_id] = {
         "signal_id":   signal_id,
