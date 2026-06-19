@@ -574,21 +574,18 @@ def set_conditional_order(
     action: 'buy' | 'sell' | 'sellall'
     stock_code: 6자리 종목코드 (알면 반드시 입력 — 삼성전자=005930, SK하이닉스=000660, NAVER=035420)
     """
-    from gpt_agent import _call_set_conditional_order
     return _call_set_conditional_order(stock_name, condition_type, condition_value, action, quantity, stock_code)
 
 
 @tool
 def list_conditional_orders() -> str:
     """등록된 조건부 주문 목록을 조회합니다."""
-    from gpt_agent import _call_list_conditional_orders
     return _call_list_conditional_orders()
 
 
 @tool
 def cancel_conditional_order(order_id: str) -> str:
     """조건부 주문을 취소합니다. order_id='all'이면 전체 취소."""
-    from gpt_agent import _call_cancel_conditional_order
     return _call_cancel_conditional_order(order_id)
 
 
