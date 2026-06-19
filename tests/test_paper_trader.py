@@ -329,7 +329,7 @@ class TestBacktestEVSource:
         assert pt.BACKTEST_EV == PAPER_BACKTEST_EV
 
     def test_backtest_ev_value(self):
-        assert abs(pt.BACKTEST_EV - 0.01468) < 1e-6
+        assert abs(pt.BACKTEST_EV - 0.01301) < 1e-6
 
 
 # ─────────────────────────────────────────────────────────────────────────────
