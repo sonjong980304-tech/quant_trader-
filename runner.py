@@ -503,6 +503,12 @@ def scan_growth_signals_eod():
             )
             continue
 
+        from paper_trader import can_add_position as _cap_live
+        _agent_live = sig.get("agent", "reversion")
+        if not _cap_live(_agent_live):
+            logger.info("[슬롯 초과] %s agent=%s — 확인 스킵", ticker, _agent_live)
+            continue
+
         from pending_confirmations import add_confirmation
         from notifier import send_buy_confirmation_keyboard
 
