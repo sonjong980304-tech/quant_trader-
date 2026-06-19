@@ -145,6 +145,16 @@ def log_paper_signal(
 
     agent="reversion" | "trend" — 슬롯 분리 10+10 관리에 사용.
     """
+    # ── 슬롯 방어: 초과 진입 및 동일 종목 중복 진입 차단 ─────────────
+    positions = _load(POS_PATH, {})
+    if not can_add_position(agent):
+        logger.warning("[Paper] 슬롯 초과 — 진입 거부: %s agent=%s", ticker, agent)
+        return ""
+    held_tickers = {p["ticker"] for p in positions.values()}
+    if ticker in held_tickers:
+        logger.warning("[Paper] 동일 종목 중복 진입 거부: %s", ticker)
+        return ""
+
     signal_id  = str(uuid.uuid4())[:8]
     now        = _now_kst()
     _eod_close = eod_close if eod_close else entry_price  # fallback
