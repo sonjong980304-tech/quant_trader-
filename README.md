@@ -32,7 +32,7 @@ LIVE_TRADING = False  (페이퍼 트레이딩 중)
 - XGBoost + Platt Scaling (CalibratedClassifierCV)
 - 트리플 배리어 레이블링: TP=+15%, SL=-8%, hold=10일
 - Walk-Forward Expanding Window (3-Fold WF)
-- OOF AUC: 0.5270 (8 피처)
+- OOF AUC: 0.5270 (전체 OOF) / 0.6591 (valid 2026) (8 피처)
 - 피처: atr_pct, kospi_relative_20d, beta_60d, ma200_deviation, ret_60d, ret_20d, high52_pct, kospi_relative_5d
 
 ### 에이전트 2 — Trend Following (규칙 기반)

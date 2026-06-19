@@ -32,7 +32,7 @@ Paper test period: started 2026-06-19 (2-week target)
 - XGBoost + Platt Scaling (CalibratedClassifierCV)
 - Triple-Barrier labeling: TP=+15%, SL=-8%, hold=10 days
 - Walk-Forward Expanding Window (3-Fold WF)
-- OOF AUC: 0.5270 (8 features)
+- OOF AUC: 0.5270 (full OOF) / 0.6591 (valid 2026) (8 features)
 - Features: atr_pct, kospi_relative_20d, beta_60d, ma200_deviation, ret_60d, ret_20d, high52_pct, kospi_relative_5d
 
 ### Agent 2 — Trend Following (rule-based)
