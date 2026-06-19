@@ -480,7 +480,6 @@ def get_stock_signal(identifier: str) -> str:
     특정 종목의 현재 기술적 지표(MA, RSI, 거래량)와 매수/매도 신호를 분석합니다.
     identifier: 종목명(예: 'LG전자') 또는 6자리 코드(예: '066570')
     """
-    from gpt_agent import _call_stock_signal
     return _call_stock_signal(identifier)
 
 
@@ -491,7 +490,6 @@ def get_historical_price(identifier: str, date: str) -> str:
     identifier: 종목명 또는 6자리 코드
     date: 날짜 (예: '2025-01-15', '2025년 1월 15일')
     """
-    from gpt_agent import _call_historical_price
     return _call_historical_price(identifier, date)
 
 
