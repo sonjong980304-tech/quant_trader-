@@ -932,20 +932,16 @@ def main():
     schedule.every().day.at("15:00").do(send_daily_summary)
     schedule.every().day.at("15:30").do(_run_paper_evaluate_kr_eod)     # KR EOD — trade_days+1 + TP/SL
     schedule.every().day.at("15:35").do(_run_paper_daily_report_kr)   # KR 마감 직후
-    schedule.every().day.at("05:20").do(scan_growth_signals_eod_us)    # US EOD 신호 스캔 (서머타임, ET 16:20)
-    # US 페이퍼 트레이딩 폐기 (2026-06-19) — trend+reversion KR만 운용
-    # schedule.every().day.at("05:25").do(lambda: __import__('paper_trader').evaluate_positions_auto())   # US TP/SL (서머타임)
-    # schedule.every().day.at("05:30").do(_run_paper_daily_report_us)   # US 마감 직후 (서머타임)
-    schedule.every().day.at("06:20").do(scan_growth_signals_eod_us)    # US EOD 신호 스캔 (동절기, ET 16:20)
-    # schedule.every().day.at("06:25").do(lambda: __import__('paper_trader').evaluate_positions_auto())   # US TP/SL (동절기)
-    # schedule.every().day.at("06:30").do(_run_paper_daily_report_us)   # US 마감 직후 (동절기)
+    # [DEPRECATED 2026-06-20] US 운용 폐기 — SoT §5: 국내(KRX)만 운용
+    # schedule.every().day.at("05:20").do(scan_growth_signals_eod_us)
+    # schedule.every().day.at("06:20").do(scan_growth_signals_eod_us)
+    # schedule.every().day.at("22:30").do(retrain_us_models)
+    # schedule.every().day.at("22:30").do(lambda: execute_pending_orders("US"))
+    # schedule.every().day.at("22:35").do(lambda: _run_paper_entry_update("US"))
+    # schedule.every().day.at("23:30").do(retrain_us_models)
+    # schedule.every().day.at("23:30").do(lambda: execute_pending_orders("US"))
+    # schedule.every().day.at("23:35").do(lambda: _run_paper_entry_update("US"))
     schedule.every().sunday.at("20:00").do(_run_paper_weekly_summary)
-    schedule.every().day.at("22:30").do(retrain_us_models)   # 서머타임 미국장 시작
-    schedule.every().day.at("22:30").do(lambda: execute_pending_orders("US"))  # 서머타임 US 예약 주문
-    schedule.every().day.at("22:35").do(lambda: _run_paper_entry_update("US"))  # US 시초가 확정 (서머타임)
-    schedule.every().day.at("23:30").do(retrain_us_models)   # 동절기 미국장 시작
-    schedule.every().day.at("23:30").do(lambda: execute_pending_orders("US"))  # 동절기 US 예약 주문
-    schedule.every().day.at("23:35").do(lambda: _run_paper_entry_update("US"))  # US 시초가 확정 (동절기)
 
     # B1: EOD 익일 시초가 전략 전환으로 장중 5분 신호 스캔 비활성화
 
