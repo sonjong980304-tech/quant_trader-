@@ -764,12 +764,12 @@ def _build_system_prompt() -> str:
      반드시 툴을 호출해 실시간 데이터를 가져오세요.
 
 ━━━ 포트폴리오 구조 ━━━
-  안전자산 70%: QQQ 22.3% / 삼성전자 27.3% / TLT 0.2% / ACE KRX금현물 50.3%
-  급등주 30%: XGBoost ML 모델 + 켈리 공식 포지션 사이징
+  Reversion 슬롯 10 (XGBoost ML + Platt Scaling) | Trend 슬롯 10 (ADX+MA+거래량 규칙)
+  슬롯 분리: 서로 침범 불가 / LIVE_TRADING=False (페이퍼 트레이딩)
 
 ━━━ 매매 전략 원칙 ━━━
-  MA{MA_SHORT}/MA{MA_LONG} + 거래량 + 캔들 기반 (기존 전략 유지)
-  급등주: 승률 ≥ 55% AND 손익비 ≥ 1.5 조건 충족 시 알림
+  Reversion: TP +15% / SL -8% / 최대 10일 보유
+  Trend: 트레일링 2ATR / MA20 이탈 청산 / KOSPI > MA200 레짐 필터
 
 ━━━ 계좌 현황 ━━━
 {cash_text}
