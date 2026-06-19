@@ -250,9 +250,6 @@ def train_global(combined_df: pd.DataFrame, agent: str,
     except ImportError:
         raise ImportError("xgboost가 설치되어 있지 않습니다. pip install xgboost")
 
-    from sklearn.calibration import CalibratedClassifierCV
-    from sklearn.frozen import FrozenEstimator
-
     combined_df = combined_df.copy()
     X          = combined_df[feature_cols].values.astype(np.float32)
     y          = combined_df["_label"].values.astype(int)
