@@ -471,7 +471,6 @@ def get_naver_news(query: str, n: int = 5) -> str:
     query: 검색 키워드 (예: 'LG전자', '반도체 업황')
     n: 뉴스 건수 (기본 5, 최대 10)
     """
-    from gpt_agent import _call_naver_news
     return _call_naver_news(query, min(max(1, n), 10))
 
 
