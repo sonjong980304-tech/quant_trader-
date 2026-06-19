@@ -166,14 +166,11 @@ def _barrier_exit(
 def walkforward_ticker(
     ticker: str,
     df_daily: pd.DataFrame,
+    kospi_df: pd.DataFrame | None = None,
 ) -> list[dict]:
     """
     단일 종목의 모든 fold에서 매매를 시뮬레이션. trades 목록 반환.
-
-    변경 (방안 1 적용):
-      - 개별 종목 ML(win_prob 필터) 제거 → 알파 파괴 방지
-      - 트리거 기반 진입: 트리거 없는 날 skip (실거래 정합성 수정)
-      - 시장 레짐 ML: 코스피 200 기반 레짐이 하락장이면 신호 차단
+    kospi_df: KOSPI 일봉 데이터 (kospi_relative 피처 계산용, None이면 NaN 처리)
     """
     from ml.features import add_features, FEATURE_COLS
 
@@ -185,14 +182,10 @@ def walkforward_ticker(
     trades: list[dict] = []
 
     for fold_i, (train_idx, test_idx) in enumerate(folds):
-        # ML 레짐 모델 비활성화 (레짐 필터 제거)
-        regime_model = None
-        kospi_df = None
-
         # ── 피처 계산 (컨텍스트 보존) ─────────────────────────────
         context_df = df_daily[df_daily.index <= test_idx[-1]]
         try:
-            feat_df   = add_features(context_df).dropna(subset=FEATURE_COLS)
+            feat_df   = add_features(context_df, kospi_df=kospi_df).dropna(subset=FEATURE_COLS)
         except Exception:
             continue
         test_feat = feat_df[feat_df.index.isin(test_idx)]
