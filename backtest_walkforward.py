@@ -214,13 +214,6 @@ def walkforward_ticker(
             if not triggers:
                 continue
 
-            # ② MA200 추세 필터
-            history = df_daily[df_daily.index <= signal_date]
-            if len(history) >= 200:
-                ma200 = float(history["Close"].rolling(200).mean().iloc[-1])
-                if float(history["Close"].iloc[-1]) < ma200:
-                    continue
-
             # ③ 진입: 다음 거래일 시가
             future_all = df_daily[df_daily.index > signal_date]
             if len(future_all) < 2:
