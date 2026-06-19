@@ -326,17 +326,13 @@ def train_global(combined_df: pd.DataFrame, agent: str,
     )
     final_model.fit(X_final_tr, y_final_tr)
 
-    # Platt Scaling 캘리브레이션
+    # Platt Scaling 미적용 — raw XGBoost 확률 사용
+    calibrated_model = final_model
     brier_raw = brier_cal = np.nan
     if len(X_calib) >= 20:
         proba_raw = final_model.predict_proba(X_calib)[:, 1]
         brier_raw = float(brier_score_loss(y_calib, proba_raw))
-        calibrated_model = CalibratedClassifierCV(FrozenEstimator(final_model), method="sigmoid")
-        calibrated_model.fit(X_calib, y_calib)
-        proba_cal = calibrated_model.predict_proba(X_calib)[:, 1]
-        brier_cal = float(brier_score_loss(y_calib, proba_cal))
-    else:
-        calibrated_model = final_model
+        brier_cal = brier_raw
 
     wins   = future_ret[y == 1]
     losses = future_ret[y == 0]
