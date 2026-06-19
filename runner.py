@@ -2,7 +2,8 @@
 runner.py - ML 급등주 전략 스케줄러
 
 스케줄:
-  5분마다  → scan_growth_signals() : ML 급등주 스캔 (한국장·미국장 자동 필터)
+  15:31   → scan_growth_signals_eod() : KR EOD ML 신호 스캔 → 익일 시초가 매수
+  05:20 / 06:20 → scan_growth_signals_eod_us() : US EOD ML 신호 스캔
   08:00   → send_morning_briefing()
   08:30   → run_monthly_rebalance() (매월 1일)
   15:00   → send_daily_summary()
@@ -21,12 +22,12 @@ import pytz
 import yfinance as yf
 
 from config import (
-    STOCKS, US_STOCKS, MA_SHORT, MA_LONG, RSI_PERIOD, KIS_APP_KEY, GROWTH_ASSET_RATIO,
+    STOCKS, MA_SHORT, MA_LONG, RSI_PERIOD, KIS_APP_KEY, GROWTH_ASSET_RATIO,
     LIVE_TRADING,
 )
 from position_manager import (
     _load_state, _check_activation, is_bot_active,
-    save_ml_position, _get_current_price, check_ml_positions,
+    save_ml_position, check_ml_positions,
     _init_legacy_tickers,
 )
 from data_fetcher import fetch_ohlcv, get_minute_data
@@ -36,7 +37,6 @@ from trader import KISTrader
 from notifier import send_telegram, build_daily_summary_message
 from morning_briefer import send_morning_briefing
 from signals.signal_graph import scan_all_graph
-from signals.alert import send_signal_alert
 from market_calendar import is_kr_trading_day
 from market_regime import get_market_regime
 
@@ -374,185 +374,6 @@ def _is_us_market() -> bool:
 
 
 # ─────────────────────────────────────────────
-# 급등주 10분 스캔
-# ─────────────────────────────────────────────
-
-def scan_growth_signals():
-    """
-    5분마다 실행 — 한국장 또는 미국장 시간 중에만 스캔.
-    봇이 활성화된 경우에만 동작.
-    """
-    if not _check_activation():
-        return
-
-    # 시장 상황 필터 (한국장만 적용 — 미국장은 KOSPI 기준 부적합)
-    is_blocked, is_bear = False, False
-    if _is_kr_market():
-        is_blocked, is_bear = get_market_regime()
-        if is_blocked:
-            logger.info("[MarketRegime] 매매 차단 (역배열) — 신호 스캔 생략")
-            return
-
-    if not (_is_kr_market() or _is_us_market()):
-        return
-
-    now = datetime.now(KST)
-    logger.info("급등주 신호 스캔 (%s)", now.strftime("%H:%M"))
-
-    growth_cash = 10_000_000 * GROWTH_ASSET_RATIO
-    total_asset = 0.0
-    if KIS_APP_KEY:
-        try:
-            t           = KISTrader()
-            total_asset = _get_total_asset(t)
-            if total_asset > 0:
-                growth_cash = total_asset * GROWTH_ASSET_RATIO
-            else:
-                logger.warning("총 자산 조회 0원 — 기본값 사용 (%.0f원)", growth_cash)
-        except Exception as e:
-            logger.warning("총 자산 조회 실패: %s", e)
-
-    if _is_kr_market():
-        # 한국장: KRX 전체 종목 1차 스크리닝 후 ML 분석
-        from signals.krx_universe import get_krx_candidates
-        stocks_to_scan = get_krx_candidates(top_n=100)
-        if not stocks_to_scan:
-            stocks_to_scan = STOCKS  # fallback
-    else:
-        # 미국장: S&P 500 전체 스크리닝
-        from signals.us_universe import get_us_candidates
-        stocks_to_scan = get_us_candidates(top_n=50)
-        if not stocks_to_scan:
-            stocks_to_scan = US_STOCKS if US_STOCKS else STOCKS
-
-    # 이미 보유 중인 ML 포지션 종목 스캔에서 제외 (당일 중복 매수 방지)
-    held = set(_load_state().get("ml_positions", {}).keys())
-    if held:
-        before = len(stocks_to_scan)
-        stocks_to_scan = {t: n for t, n in stocks_to_scan.items() if t not in held}
-        logger.info("보유 중 종목 제외: %d개 → %d개", before, len(stocks_to_scan))
-
-    # 일봉 캐시 미스 종목 병렬 다운로드
-    tickers = list(stocks_to_scan.keys())
-    _prefetch_parallel(tickers)
-
-    # 미국 주식만 yfinance 분봉 병렬 다운로드 (한국 주식은 KIS API 실시간 사용)
-    us_tickers = [t for t in tickers if not (t.endswith(".KS") or t.endswith(".KQ"))]
-    now = time.time()
-    stale_min = [t for t in us_tickers
-                 if t not in _MINUTE_CACHE or now - _MINUTE_CACHE[t][1] >= _MINUTE_TTL]
-    if stale_min:
-        logger.info("미국 분봉 병렬 다운로드: %d종목", len(stale_min))
-        with ThreadPoolExecutor(max_workers=5) as ex:
-            list(ex.map(_fetch_minute_yf, stale_min))
-
-    def _fetch_with_today(ticker: str) -> pd.DataFrame:
-        df = _cached_fetch(ticker)
-        if ticker.endswith(".KS") or ticker.endswith(".KQ"):
-            # 한국 주식: KIS API 실시간 바 (yfinance 사용 안 함)
-            minute_df = _fetch_kr_realtime_bar(ticker)
-        else:
-            # 미국 주식: yfinance 5분봉
-            minute_df = _fetch_minute_yf(ticker)
-        return _append_today_bar(df, minute_df)
-
-    signals = scan_all(stocks_to_scan, _fetch_with_today, is_bear=is_bear)
-
-    if not signals:
-        logger.debug("급등주 신호 없음")
-        return
-
-    logger.info("신호 발생: %d개 종목", len(signals))
-    today_str = datetime.now(KST).strftime("%Y-%m-%d")
-    for sig in signals:
-        ticker = sig["ticker"]
-
-        # 당일 이미 알림을 보낸 종목은 스킵
-        if _alerted_today.get(ticker) == today_str:
-            logger.info("[%s] 당일 이미 알림 전송 — 스킵", ticker)
-            continue
-
-        # KIS API 실시간 현재가로 교정 (yfinance 오류·지연 방지)
-        if KIS_APP_KEY:
-            try:
-                code = ticker.replace(".KS", "").replace(".KQ", "")
-                if ticker.endswith(".KS") or ticker.endswith(".KQ"):
-                    real_price = KISTrader().get_current_price(code)["price"]
-                else:
-                    real_price = KISTrader().get_us_current_price(code)["price"]
-                if real_price and float(real_price) > 0:
-                    sig["current_price"] = float(real_price)
-            except Exception as e:
-                logger.debug("KIS 현재가 조회 실패 [%s]: %s", ticker, e)
-
-        # 리스크동등화(Risk Parity): 총 자산의 1% 리스크 기준 수량 역산
-        is_us = not (ticker.endswith(".KS") or ticker.endswith(".KQ"))
-        atr = sig.get("atr", 0)
-        if atr > 0 and total_asset > 0:
-            _EXCHANGE_RATE_RP = 1400
-            if is_us:
-                risk_usd = (total_asset * 0.01) / _EXCHANGE_RATE_RP
-                rp_qty   = max(1, int(risk_usd / (2.0 * atr)))
-            else:
-                rp_qty   = max(1, int((total_asset * 0.01) / (2.0 * atr)))
-            sig["risk_parity_qty"] = rp_qty
-
-        # ── LIVE_TRADING 게이트 ───────────────────────────────────────
-        # GATE A·B·C 검증 통과 전까지 실주문 차단 (config.LIVE_TRADING=True 시 해제)
-        if not LIVE_TRADING:
-            logger.warning(
-                "[LIVE_TRADING=False] 실주문 차단 — 페이퍼: %s 승률=%.1f%% rr=%.2f",
-                ticker, sig["win_prob"] * 100, sig.get("risk_reward", 0),
-            )
-            try:
-                from paper_trader import log_paper_signal, is_circuit_breaker_active
-                if not is_circuit_breaker_active():
-                    log_paper_signal(
-                        ticker           = ticker,
-                        name             = sig.get("name", ticker),
-                        agent            = sig.get("agent", "unknown"),
-                        trigger_types    = sig.get("trigger_types", []),
-                        win_prob         = sig["win_prob"],
-                        avg_win          = sig["avg_win"],
-                        avg_loss         = sig["avg_loss"],
-                        rr               = sig.get("risk_reward", 0.0),
-                        regime_prob      = sig.get("regime_prob"),
-                        regime_pass      = True,
-                        entry_price      = None,
-                        actual_price     = None,
-                        position_size_pct= 0.0,
-                        kelly_fraction   = None,
-                        auc_at_signal    = sig.get("model_auc"),
-                        eod_close        = _get_current_price(ticker) or 0.0,
-                    )
-            except Exception as _pe:
-                logger.warning("[Paper] 신호 기록 실패: %s", _pe)
-            send_telegram(
-                f"📋 [페이퍼트레이딩] <b>{sig.get('name', ticker)} ({ticker})</b>\n"
-                f"승률 {sig['win_prob']*100:.1f}% | 손익비 {sig.get('risk_reward',0):.2f}\n"
-                f"<i>GATE A·B·C 미통과 — 실주문 차단</i>"
-            )
-            _alerted_today[ticker] = today_str
-            continue
-        # ─────────────────────────────────────────────────────────────
-
-        result = send_signal_alert(sig, growth_cash)
-        _alerted_today[ticker] = today_str
-
-        # 매수 성공 시 ML 포지션 저장 (익절/손절/7일 청산 추적용)
-        if result.get("status") == "ok" and result.get("qty", 0) > 0:
-            save_ml_position(
-                ticker       = ticker,
-                name         = sig.get("name", ticker),
-                qty          = result["qty"],
-                entry_price  = result["price"],
-                avg_win      = sig["avg_win"],
-                atr          = sig.get("atr", 0.0),
-                is_us        = is_us,
-            )
-
-
-# ─────────────────────────────────────────────
 # EOD 신호 스캔 (15:31) — Train/Serve Skew 해소 (GATE B)
 # ─────────────────────────────────────────────
 
@@ -571,7 +392,7 @@ def scan_growth_signals_eod():
 
     logger.info("EOD 신호 스캔 시작 (15:31)")
 
-    _, is_bear = get_market_regime()
+    _, is_bear, adr_bear = get_market_regime()
 
     from signals.krx_universe import get_krx_candidates
     stocks_to_scan = get_krx_candidates(top_n=100)
@@ -593,7 +414,7 @@ def scan_growth_signals_eod():
     def _fetch_eod_only(ticker: str) -> pd.DataFrame:
         return _cached_fetch(ticker)
 
-    signals = scan_all_graph(stocks_to_scan, _fetch_eod_only, is_bear=is_bear)
+    signals = scan_all_graph(stocks_to_scan, _fetch_eod_only, is_bear=is_bear, adr_bear=adr_bear)
     if not signals:
         logger.info("EOD 신호 없음")
         return

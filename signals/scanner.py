@@ -22,7 +22,8 @@ logger = logging.getLogger(__name__)
 MIN_TRIGGERS    = 1      # 기술적 트리거 최소 1개 이상
 MIN_MODEL_AUC   = 0.58   # 최소 모델 예측력 (0.5 = 동전던지기, 0.58+ = 참고 가능)
 
-BEAR_AVG_WIN_PENALTY = 0.4   # 약세장 avg_win 보정 계수
+BEAR_AVG_WIN_PENALTY         = 0.4   # 약세장(MA/RSI) avg_win 보정 계수
+BEAR_REVERSION_ADR_PENALTY   = 0.25  # ADR 약세장 시 reversion 전용 패널티
 
 # 트리거 → 에이전트 매핑
 _MOMENTUM_TRIGGERS  = {"거래량폭발", "BB스퀴즈돌파"}
@@ -164,7 +165,8 @@ def detect_triggers(df: pd.DataFrame) -> list[str]:
 # 단일 종목 스캔
 # ─────────────────────────────────────────────
 
-def _eval_agent(df: pd.DataFrame, ticker: str, agent: str, is_bear: bool = False) -> dict | None:
+def _eval_agent(df: pd.DataFrame, ticker: str, agent: str,
+                is_bear: bool = False, adr_bear: bool = False) -> dict | None:
     """단일 에이전트 예측. 조건 미충족 시 None."""
     from ml.model import predict
     pred = predict(df, ticker, agent=agent)
@@ -185,7 +187,15 @@ def _eval_agent(df: pd.DataFrame, ticker: str, agent: str, is_bear: bool = False
                      ticker, agent, win_prob * 100, MIN_WIN_PROB * 100)
         return None
     # 약세장 avg_win 보정
-    effective_avg_win = avg_win * BEAR_AVG_WIN_PENALTY if is_bear else avg_win
+    # ADR 약세장 + reversion: 0.25 패널티 (지수 상승에도 개별 종목 하락 폭 큰 환경)
+    # 그 외 약세장: 0.4 패널티
+    if adr_bear and agent == "reversion":
+        penalty = BEAR_REVERSION_ADR_PENALTY
+    elif is_bear:
+        penalty = BEAR_AVG_WIN_PENALTY
+    else:
+        penalty = 1.0
+    effective_avg_win = avg_win * penalty
     expected_win  = effective_avg_win * win_prob
     expected_loss = avg_loss * (1 - win_prob)
     rr = expected_win / expected_loss if expected_loss > 0 else 0.0

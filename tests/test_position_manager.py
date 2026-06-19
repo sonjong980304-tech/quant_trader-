@@ -146,6 +146,7 @@ class TestCheckMlPositions:
     def test_tp_removes_position(self, monkeypatch):
         monkeypatch.setattr(pm, "_get_current_price", lambda t: 12000.0)
         monkeypatch.setattr(pm, "_trading_days_elapsed", lambda d: 0)
+        monkeypatch.setattr(pm, "_is_market_open", lambda is_us: True)
         pm._save_state({"ml_positions": {"T.KS": _make_pos("T.KS")}})
         pm.check_ml_positions()
         assert "T.KS" not in pm._load_state().get("ml_positions", {})
@@ -153,6 +154,7 @@ class TestCheckMlPositions:
     def test_sl_removes_position(self, monkeypatch):
         monkeypatch.setattr(pm, "_get_current_price", lambda t: 9000.0)
         monkeypatch.setattr(pm, "_trading_days_elapsed", lambda d: 0)
+        monkeypatch.setattr(pm, "_is_market_open", lambda is_us: True)
         pm._save_state({"ml_positions": {"S.KS": _make_pos("S.KS")}})
         pm.check_ml_positions()
         assert "S.KS" not in pm._load_state().get("ml_positions", {})
@@ -160,6 +162,7 @@ class TestCheckMlPositions:
     def test_horizon_removes_position(self, monkeypatch):
         monkeypatch.setattr(pm, "_get_current_price", lambda t: 10500.0)
         monkeypatch.setattr(pm, "_trading_days_elapsed", lambda d: 7)
+        monkeypatch.setattr(pm, "_is_market_open", lambda is_us: True)
         pm._save_state({"ml_positions": {"H.KS": _make_pos("H.KS")}})
         pm.check_ml_positions()
         assert "H.KS" not in pm._load_state().get("ml_positions", {})
@@ -167,6 +170,7 @@ class TestCheckMlPositions:
     def test_no_trigger_keeps_position(self, monkeypatch):
         monkeypatch.setattr(pm, "_get_current_price", lambda t: 10500.0)
         monkeypatch.setattr(pm, "_trading_days_elapsed", lambda d: 3)
+        monkeypatch.setattr(pm, "_is_market_open", lambda is_us: True)
         pm._save_state({"ml_positions": {"K.KS": _make_pos("K.KS")}})
         pm.check_ml_positions()
         assert "K.KS" in pm._load_state().get("ml_positions", {})
@@ -174,6 +178,7 @@ class TestCheckMlPositions:
     def test_highest_price_updated(self, monkeypatch):
         monkeypatch.setattr(pm, "_get_current_price", lambda t: 10800.0)
         monkeypatch.setattr(pm, "_trading_days_elapsed", lambda d: 3)
+        monkeypatch.setattr(pm, "_is_market_open", lambda is_us: True)
         pm._save_state({"ml_positions": {"U.KS": _make_pos("U.KS", entry=10000.0, target=11500.0)}})
         pm.check_ml_positions()
         pos = pm._load_state().get("ml_positions", {}).get("U.KS")

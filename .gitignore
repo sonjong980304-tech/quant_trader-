@@ -13,4 +13,5 @@ conditional_orders.json
 ml/models/
 trade_history.csv
 state.json
+paper_positions.json
 !docs/*.png

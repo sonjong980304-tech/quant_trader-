@@ -21,6 +21,18 @@ from market_calendar import is_kr_trading_day
 KST = pytz.timezone("Asia/Seoul")
 logger = logging.getLogger(__name__)
 
+
+def _is_market_open(is_us: bool) -> bool:
+    """현재 시각이 해당 시장 장중 시간인지 반환 (테스트에서 monkeypatch 가능)."""
+    now_kst = datetime.now(KST)
+    if is_us:
+        eastern = pytz.timezone("America/New_York")
+        now_et  = now_kst.astimezone(eastern)
+        et_min  = now_et.hour * 60 + now_et.minute
+        return (now_et.weekday() < 5) and (9 * 60 + 30 <= et_min < 16 * 60)
+    kr_min = now_kst.hour * 60 + now_kst.minute
+    return is_kr_trading_day(now_kst.date()) and (9 * 60 <= kr_min < 15 * 60 + 30)
+
 _STATE_FILE = "/Users/gyuyeong/quant_trader/state.json"
 
 
@@ -205,13 +217,17 @@ def check_ml_positions():
     to_remove = []
     for ticker, pos in positions.items():
         try:
-            cur_price = _get_current_price(ticker)
+            is_us = pos.get("is_us", False)
+
+            # 장 시간 외에는 TP/SL/트레일링 체크 스킵 (7거래일 경과는 항상 체크)
+            in_market = _is_market_open(is_us)
+
+            cur_price = _get_current_price(ticker) if in_market else None
             elapsed   = _trading_days_elapsed(pos["entry_date"])
             qty       = pos["qty"]
             name      = pos.get("name", ticker)
             target    = pos["target_price"]
             stop      = pos.get("stop_price", pos["entry_price"] * 0.93)
-            is_us     = pos.get("is_us", False)
 
             if cur_price and cur_price > pos.get("highest_price", pos["entry_price"]):
                 pos["highest_price"] = round(cur_price, 4)
