@@ -461,7 +461,6 @@ def get_yahoo_finance(ticker: str) -> str:
     Yahoo Finance에서 미국 주식 재무지표(PER, EPS, ROE, 매출 등)를 조회합니다.
     ticker: Yahoo Finance 심볼 (예: 'AAPL', 'TSLA', 'NVDA')
     """
-    from gpt_agent import _call_yahoo_finance
     return _call_yahoo_finance(ticker)
 
 
