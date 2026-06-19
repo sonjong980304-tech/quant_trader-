@@ -479,7 +479,7 @@ def scan_growth_signals_eod():
                     log_paper_signal(
                         ticker           = ticker,
                         name             = sig.get("name", ticker),
-                        agent            = sig.get("agent", "eod"),
+                        agent            = _agent,
                         trigger_types    = sig.get("trigger_types", []),
                         win_prob         = sig["win_prob"],
                         avg_win          = sig["avg_win"],
