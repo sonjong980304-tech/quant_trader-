@@ -33,13 +33,14 @@ def _model_path(ticker: str, agent: str = "") -> str:
     return os.path.join(MODEL_DIR, f"{ticker.replace('.', '_')}{suffix}.pkl")
 
 
-def train(df: pd.DataFrame, ticker: str, agent: str = "") -> tuple[object, dict]:
+def train(df: pd.DataFrame, ticker: str, agent: str = "", kospi_df: pd.DataFrame | None = None) -> tuple[object, dict]:
     """
     XGBoost 모델 학습 후 pkl 저장.
 
-    df     : 5~10년치 OHLCV 데이터프레임
-    ticker : 종목 티커 (파일명 키)
-    agent  : "" (전체) | "momentum" (돌파) | "reversion" (눌림목)
+    df       : 5~10년치 OHLCV 데이터프레임
+    ticker   : 종목 티커 (파일명 키)
+    agent    : "" (전체) | "momentum" (돌파) | "reversion" (눌림목)
+    kospi_df : KOSPI 일봉 데이터 (None이면 kospi_relative_* NaN → dropna 전행 제거)
 
     반환: (model, metrics)
     metrics 키: accuracy, auc, avg_win, avg_loss, n_samples, positive_rate
@@ -49,7 +50,7 @@ def train(df: pd.DataFrame, ticker: str, agent: str = "") -> tuple[object, dict]
     except ImportError:
         raise ImportError("xgboost가 설치되어 있지 않습니다. pip install xgboost")
 
-    df = add_features(df)
+    df = add_features(df, kospi_df=kospi_df)
     labels, future_returns = _triple_barrier_pnl(
         df, tp_pct=TP_PCT, sl_pct=SL_PCT, max_holding_days=HORIZON
     )
