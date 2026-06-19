@@ -175,7 +175,7 @@ def _llm_decide_rebalance(
 """
 
     resp = client.chat.completions.create(
-        model="gpt-5.5",
+        model="gpt-5.4-mini",
         messages=[
             {"role": "system", "content": "포트폴리오 리밸런싱 전문가. 간결하고 정확하게 답변."},
             {"role": "user",   "content": prompt},

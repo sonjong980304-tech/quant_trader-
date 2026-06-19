@@ -813,7 +813,7 @@ def _get_react_agent():
     global _react_agent
     if _react_agent is None:
         llm = ChatOpenAI(
-            model="gpt-5.5",
+            model="gpt-5.4-mini",
             api_key=OPENAI_API_KEY,
             temperature=0,
         )
