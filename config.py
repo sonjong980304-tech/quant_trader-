@@ -118,23 +118,29 @@ MARKET_TOTAL_MINUTES  = 390     # 9:00 ~ 15:30 = 390분
 LOG_FILE = "logs/trader.log"
 
 # ─────────────────────────────────────────────
-# 페이퍼 트레이딩 기준값
+# 페이퍼 트레이딩 기준값 (슬롯 분리 10+10, 2026-06-19 채택)
 # ─────────────────────────────────────────────
-# G1 그리드 채택 결과 (TP=15%/SL=6%, 2026-06-10).
-# 페이퍼 EV와의 갭 비교에 사용. 재검증 시 업데이트.
-PAPER_BACKTEST_EV_KR = 0.01468  # +1.468% (TP=15%/SL=6%, slip=0.05%, 2026-06-10)
-PAPER_BACKTEST_EV_US = None     # US 백테스트 미검증 — 탐색적 운용
-TP_PCT               = 0.15     # 익절 +15%  (G1 그리드 채택)
-SL_PCT               = 0.06     # 손절 -6%   (G1 그리드 채택)
-EOD_SLIPPAGE_PCT     = 0.0005   # 익일 시초가 지정가 진입 슬리피지 0.05%
-EOD_HORIZON          = 7        # 보유기간 거래일 (B2: H=7 MDD 최소, CI 여유 최대)
+# 합산 백테스트: reversion 10슬롯 + trend 10슬롯 분리 운용
+PAPER_BACKTEST_EV_KR = 0.01468   # 백테스트 참고 EV (TP=15%/SL=8%)
+PAPER_BACKTEST_EV_US = None      # US 미운용
+
+# reversion 에이전트 전용 파라미터
+TP_PCT               = 0.15      # reversion 익절 +15%
+SL_PCT               = 0.08      # reversion 손절 -8%
+EOD_SLIPPAGE_PCT     = 0.0005    # 0.05% 슬리피지
+EOD_HORIZON          = 10        # reversion 보유기간 (거래일)
+# trend 에이전트: TP 없음, trailing stop 2.0×ATR + MA20 이탈 청산
+
+# 슬롯 설정
+REV_SLOTS            = 10        # reversion 전용 슬롯
+TR_SLOTS             = 10        # trend 전용 슬롯
+MAX_TOTAL_SLOTS      = 20        # 총 최대 동시 보유 종목 수
 
 # ─────────────────────────────────────────────
 # 실거래 안전 게이트
 # ─────────────────────────────────────────────
-# GATE A·B·C 검증 통과 전까지 False로 유지.
-# True로 바꾸려면 walk-forward EV > 0, train/serve skew 해소,
-# 부트스트랩 CI 하단 > 0 조건을 모두 만족해야 함.
+# LIVE_TRADING=False: 페이퍼 트레이딩 모드 (2주 검증 후 True 전환 예정)
+# 전환 조건: EV>0, CI 하단>0, 슬리피지<0.5%
 LIVE_TRADING = False
 
 # ─────────────────────────────────────────────
@@ -144,18 +150,3 @@ ML_HORIZON          = 7      # 예측 기간 (일)
 ML_THRESHOLD        = 0.03   # 성공 기준 수익률 (3% 이상 = 성공)
 ML_MIN_WIN_PROB     = 0.60   # 신호 발송 최소 승률
 ML_MIN_RISK_REWARD  = 1.5    # 신호 발송 최소 손익비
-
-# ─────────────────────────────────────────────
-# 포트폴리오 배분
-# ─────────────────────────────────────────────
-SAFE_ASSET_RATIO    = 0.70   # 안전자산 비중 (QQQ/삼성전자/TLT/금)
-GROWTH_ASSET_RATIO  = 0.30   # 급등주 비중
-REBALANCE_THRESHOLD = 0.05   # 리밸런싱 괴리 기준 (±5%)
-
-# 안전자산 최적 비중 (몬테카를로 최대 샤프비율 기준)
-SAFE_WEIGHTS = {
-    "QQQ": 0.2214,
-    "005930.KS": 0.245,
-    "TLT": 0.0013,
-    "411060.KS": 0.5324,
-}

@@ -122,7 +122,7 @@ class TestEvaluatePositions:
     # --- SL 시나리오 ---
     def test_sl_triggers(self):
         self._setup()
-        closed = pt.evaluate_positions({"005930.KS": self.ENTRY * 0.928})
+        closed = pt.evaluate_positions({"005930.KS": self.ENTRY * 0.91})  # -9% (SL_PCT=8%)
         assert len(closed) == 1
         assert closed[0]["reason"] == "SL"
 
@@ -341,8 +341,8 @@ class TestParamSnapshot:
         _signal()
         snap = pt._load(pt.SNAPSHOT_PATH, {})
         assert snap["TP_PCT"] == 0.15
-        assert snap["SL_PCT"] == 0.06
-        assert snap["HORIZON"] == 7
+        assert snap["SL_PCT"] == 0.08
+        assert snap["HORIZON"] == 10
 
     def test_no_drift_when_params_unchanged(self):
         _signal()

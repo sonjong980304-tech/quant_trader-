@@ -3,7 +3,7 @@ morning_briefer.py - 평일 오전 8시 자동 모닝 브리핑
 
 흐름:
   1. Tavily 웹 검색으로 미국 증시 / 관심종목 뉴스 / 경제 캘린더 수집
-  2. GPT-A(gpt-5.5): 4가지 질문에 대한 브리핑 생성
+  2. GPT-A(gpt-5.4-mini): 4가지 질문에 대한 브리핑 생성
   3. GPT-B(gpt-5.4-mini): Context Recall 평가 (검색 결과를 얼마나 충실히 반영했는지)
   4. 브리핑 + 평가 결과를 텔레그램으로 전송
 """
@@ -241,7 +241,7 @@ def _generate_briefing(context: dict) -> str:
 """
 
     resp = client.chat.completions.create(
-        model="gpt-5.5",
+        model="gpt-5.4-mini",
         messages=[
             {"role": "system", "content": "당신은 전문 금융 시황 브리핑 어시스턴트입니다. 간결하고 정확하게 답변하세요."},
             {"role": "user",   "content": user_prompt},

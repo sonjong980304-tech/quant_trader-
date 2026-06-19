@@ -184,3 +184,34 @@ class TestCheckMlPositions:
         pos = pm._load_state().get("ml_positions", {}).get("U.KS")
         assert pos is not None
         assert pos["highest_price"] == pytest.approx(10800.0, rel=1e-4)
+
+
+# ─── 장외 보호 회귀 테스트 ──────────────────────────────────────────────────────
+
+class TestOffHoursProtection:
+    def test_7day_offhours_keeps_position(self, monkeypatch):
+        """장외에 7거래일 경과해도 청산하지 않는다."""
+        monkeypatch.setattr(pm, "_get_current_price", lambda t: None)
+        monkeypatch.setattr(pm, "_trading_days_elapsed", lambda d: 8)
+        monkeypatch.setattr(pm, "_is_market_open", lambda is_us: False)
+        pm._save_state({"ml_positions": {"O1.KS": _make_pos("O1.KS")}})
+        pm.check_ml_positions()
+        assert "O1.KS" in pm._load_state().get("ml_positions", {})
+
+    def test_tp_offhours_keeps_position(self, monkeypatch):
+        """장외에는 현재가를 조회하지 않아 목표가에 도달해도 청산하지 않는다."""
+        monkeypatch.setattr(pm, "_get_current_price", lambda t: (_ for _ in ()).throw(AssertionError("장외에 현재가 조회 금지")))
+        monkeypatch.setattr(pm, "_trading_days_elapsed", lambda d: 3)
+        monkeypatch.setattr(pm, "_is_market_open", lambda is_us: False)
+        pm._save_state({"ml_positions": {"O2.KS": _make_pos("O2.KS")}})
+        pm.check_ml_positions()
+        assert "O2.KS" in pm._load_state().get("ml_positions", {})
+
+    def test_sl_offhours_keeps_position(self, monkeypatch):
+        """장외에는 현재가를 조회하지 않아 손절가 이하여도 청산하지 않는다."""
+        monkeypatch.setattr(pm, "_get_current_price", lambda t: (_ for _ in ()).throw(AssertionError("장외에 현재가 조회 금지")))
+        monkeypatch.setattr(pm, "_trading_days_elapsed", lambda d: 3)
+        monkeypatch.setattr(pm, "_is_market_open", lambda is_us: False)
+        pm._save_state({"ml_positions": {"O3.KS": _make_pos("O3.KS")}})
+        pm.check_ml_positions()
+        assert "O3.KS" in pm._load_state().get("ml_positions", {})

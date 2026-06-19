@@ -35,8 +35,6 @@ class SignalState(TypedDict):
     ticker:           str
     name:             str
     df:               Any              # pd.DataFrame
-    is_bear:          bool
-    adr_bear:         bool
     triggers:         list[str]
     has_momentum:     bool
     has_reversion:    bool
@@ -72,23 +70,19 @@ def _node_trigger_detect(state: SignalState) -> SignalState:
 
 
 def _node_momentum_agent(state: SignalState) -> SignalState:
-    result = _eval_agent(state["df"], state["ticker"], "momentum",
-                         is_bear=state["is_bear"], adr_bear=state["adr_bear"])
+    result = _eval_agent(state["df"], state["ticker"], "momentum")
     return {**state, "momentum_result": result}
 
 
 def _node_reversion_agent(state: SignalState) -> SignalState:
-    result = _eval_agent(state["df"], state["ticker"], "reversion",
-                         is_bear=state["is_bear"], adr_bear=state["adr_bear"])
+    result = _eval_agent(state["df"], state["ticker"], "reversion")
     return {**state, "reversion_result": result}
 
 
 def _node_both_agents(state: SignalState) -> SignalState:
     """momentum + reversion 트리거가 동시에 발생한 경우 두 에이전트 모두 실행."""
-    m = _eval_agent(state["df"], state["ticker"], "momentum",
-                    is_bear=state["is_bear"], adr_bear=state["adr_bear"])
-    r = _eval_agent(state["df"], state["ticker"], "reversion",
-                    is_bear=state["is_bear"], adr_bear=state["adr_bear"])
+    m = _eval_agent(state["df"], state["ticker"], "momentum")
+    r = _eval_agent(state["df"], state["ticker"], "reversion")
     return {**state, "momentum_result": m, "reversion_result": r}
 
 
@@ -169,8 +163,7 @@ _signal_graph = _build_signal_graph()
 
 # ── 공개 API ──────────────────────────────────────────────────────────────
 
-def scan_ticker_graph(ticker: str, name: str, df,
-                      is_bear: bool = False, adr_bear: bool = False) -> dict | None:
+def scan_ticker_graph(ticker: str, name: str, df) -> dict | None:
     """
     LangGraph 기반 단일 종목 신호 탐지.
     scanner.scan_ticker()와 동일한 결과를 반환하며 그래프 실행 이력을 추적 가능.
@@ -182,8 +175,6 @@ def scan_ticker_graph(ticker: str, name: str, df,
             "ticker":           ticker,
             "name":             name,
             "df":               df,
-            "is_bear":          is_bear,
-            "adr_bear":         adr_bear,
             "triggers":         [],
             "has_momentum":     False,
             "has_reversion":    False,
@@ -197,8 +188,7 @@ def scan_ticker_graph(ticker: str, name: str, df,
         return None
 
 
-def scan_all_graph(stocks: dict, fetch_fn,
-                   is_bear: bool = False, adr_bear: bool = False) -> list[dict]:
+def scan_all_graph(stocks: dict, fetch_fn) -> list[dict]:
     """
     LangGraph 기반 전체 종목 스캔.
     runner.py의 scan_all() 대체 함수.
@@ -209,7 +199,7 @@ def scan_all_graph(stocks: dict, fetch_fn,
             continue
         try:
             df     = fetch_fn(ticker)
-            result = scan_ticker_graph(ticker, name, df, is_bear=is_bear, adr_bear=adr_bear)
+            result = scan_ticker_graph(ticker, name, df)
             if result:
                 signals.append(result)
         except Exception as e:

@@ -129,19 +129,20 @@ def get_account_balance() -> str:
 
 @tool
 def get_portfolio_status() -> str:
-    """안전자산 포트폴리오(70%) 현황과 리밸런싱 필요 여부를 확인합니다."""
+    """페이퍼 트레이딩 포지션 현황 (reversion + trend 슬롯 분리 10+10)을 확인합니다."""
     try:
-        from portfolio.safe_portfolio import format_rebalance_report
-        from trader import KISTrader
-        from config import KIS_APP_KEY
-        holdings    = {}
-        total_asset = 10_000_000
-        if KIS_APP_KEY:
-            t           = KISTrader()
-            balance     = t.get_balance()
-            total_asset = t.get_total_eval_amt()
-            holdings    = {h["stock_code"]: {"qty": h["qty"]} for h in balance}
-        return format_rebalance_report(holdings, total_asset)
+        from paper_trader import _load, POS_PATH
+        from config import REV_SLOTS, TR_SLOTS
+        positions = _load(POS_PATH, {})
+        rev = [p for p in positions.values() if p.get("agent") == "reversion"]
+        tr  = [p for p in positions.values() if p.get("agent") == "trend"]
+        lines = [
+            f"[Reversion] {len(rev)}/{REV_SLOTS} 슬롯",
+            *[f"  {p.get('name','?')} 진입 {p.get('entry_price',0):,.0f}원  {p.get('trade_days',0)}일" for p in rev],
+            f"[Trend] {len(tr)}/{TR_SLOTS} 슬롯",
+            *[f"  {p.get('name','?')} 진입 {p.get('entry_price',0):,.0f}원  {p.get('trade_days',0)}일" for p in tr],
+        ]
+        return "\n".join(lines) if positions else "보유 포지션 없음"
     except Exception as e:
         return f"포트폴리오 조회 실패: {e}"
 

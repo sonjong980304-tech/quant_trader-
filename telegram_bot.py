@@ -778,31 +778,30 @@ async def cmd_pendingorders(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 
-# /portfolio — 안전자산 포트폴리오 현황
+# /portfolio — 페이퍼 포지션 현황 (reversion + trend 슬롯 분리 10+10)
 # ─────────────────────────────────────────────
 async def cmd_portfolio(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("⏳ 포트폴리오 현황 조회 중...")
     try:
-        from portfolio.safe_portfolio import format_rebalance_report
-        from trader import KISTrader
-        from config import KIS_APP_KEY
-
-        holdings = {}
-        total_asset = 0.0
-        if KIS_APP_KEY:
-            t = KISTrader()
-            balance = t.get_balance()
-            cash = t.get_available_cash()
-            for h in balance:
-                holdings[h["stock_code"]] = {"qty": h["qty"], "avg_price": h["avg_price"]}
-                total_asset += h["qty"] * h["avg_price"]
-            total_asset += cash
-
-        if total_asset <= 0:
-            total_asset = 10_000_000  # 시뮬레이션 기본값
-
-        report = format_rebalance_report(holdings, total_asset)
-        await update.message.reply_text(report, parse_mode="HTML")
+        from paper_trader import _load, POS_PATH
+        from config import REV_SLOTS, TR_SLOTS
+        positions = _load(POS_PATH, {})
+        rev_pos = [p for p in positions.values() if p.get("agent") == "reversion"]
+        tr_pos  = [p for p in positions.values() if p.get("agent") == "trend"]
+        lines = [
+            "<b>📊 페이퍼 포트폴리오 (슬롯 분리 10+10)</b>",
+            f"",
+            f"<b>[Reversion]</b>  {len(rev_pos)}/{REV_SLOTS} 슬롯",
+        ]
+        for p in rev_pos:
+            lines.append(f"  • {p.get('name', p.get('ticker','?'))}  진입 {p.get('entry_price',0):,.0f}원  {p.get('trade_days',0)}일 경과")
+        lines.append(f"")
+        lines.append(f"<b>[Trend]</b>  {len(tr_pos)}/{TR_SLOTS} 슬롯")
+        for p in tr_pos:
+            lines.append(f"  • {p.get('name', p.get('ticker','?'))}  진입 {p.get('entry_price',0):,.0f}원  {p.get('trade_days',0)}일 경과")
+        if not rev_pos and not tr_pos:
+            lines.append("  보유 포지션 없음")
+        await update.message.reply_text("\n".join(lines), parse_mode="HTML")
     except Exception as e:
         await update.message.reply_text(f"⚠️ 포트폴리오 조회 실패: {e}")
 
@@ -817,23 +816,23 @@ async def cmd_scanstocks(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         def _scan():
             from signals.scanner import scan_all
-            from config import KIS_APP_KEY, GROWTH_ASSET_RATIO
+            from config import KIS_APP_KEY
             from data_fetcher import fetch_ohlcv
 
-            growth_cash = 3_000_000  # 시뮬레이션 기본값
+            growth_cash = 10_000_000  # 시뮬레이션 기본값
             if KIS_APP_KEY:
                 try:
                     from trader import KISTrader
                     t = KISTrader()
                     cash = t.get_available_cash()
                     balance = t.get_balance()
-                    total = cash + sum(h["qty"] * h["avg_price"] for h in balance)
-                    growth_cash = total * GROWTH_ASSET_RATIO
+                    growth_cash = cash + sum(h["qty"] * h["avg_price"] for h in balance)
                 except Exception:
                     pass
 
+            from signals.signal_graph import scan_all_graph
             stocks = read_stocks_from_config()
-            signals = scan_all(stocks, lambda t: fetch_ohlcv(t, period_years=1))
+            signals = scan_all_graph(stocks, lambda t: fetch_ohlcv(t, period_years=1))
             return signals, growth_cash
 
         signals, growth_cash = await loop.run_in_executor(None, _scan)
@@ -863,17 +862,16 @@ async def cmd_buysignal(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(f"⏳ {signal.get('name', signal['ticker'])} 매수 중...")
     try:
-        from config import KIS_APP_KEY, GROWTH_ASSET_RATIO
+        from config import KIS_APP_KEY
         from portfolio.kelly import position_size
 
-        growth_cash = 3_000_000
+        growth_cash = 10_000_000
         if KIS_APP_KEY:
             from trader import KISTrader
             t = KISTrader()
             cash = t.get_available_cash()
             balance = t.get_balance()
-            total = cash + sum(h["qty"] * h["avg_price"] for h in balance)
-            growth_cash = total * GROWTH_ASSET_RATIO
+            growth_cash = cash + sum(h["qty"] * h["avg_price"] for h in balance)
 
         price = signal["current_price"]
         qty, kelly_f, amount = position_size(

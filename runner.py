@@ -22,7 +22,7 @@ import pytz
 import yfinance as yf
 
 from config import (
-    STOCKS, MA_SHORT, MA_LONG, RSI_PERIOD, KIS_APP_KEY, GROWTH_ASSET_RATIO,
+    STOCKS, MA_SHORT, MA_LONG, RSI_PERIOD, KIS_APP_KEY,
     LIVE_TRADING,
 )
 from position_manager import (
@@ -38,7 +38,6 @@ from notifier import send_telegram, build_daily_summary_message
 from morning_briefer import send_morning_briefing
 from signals.signal_graph import scan_all_graph
 from market_calendar import is_kr_trading_day
-from market_regime import get_market_regime
 
 KST      = pytz.timezone("Asia/Seoul")
 LOG_FILE = "logs/trader.log"
@@ -392,8 +391,6 @@ def scan_growth_signals_eod():
 
     logger.info("EOD 신호 스캔 시작 (15:31)")
 
-    _, is_bear, adr_bear = get_market_regime()
-
     from signals.krx_universe import get_krx_candidates
     stocks_to_scan = get_krx_candidates(top_n=100)
     if not stocks_to_scan:
@@ -414,12 +411,27 @@ def scan_growth_signals_eod():
     def _fetch_eod_only(ticker: str) -> pd.DataFrame:
         return _cached_fetch(ticker)
 
-    signals = scan_all_graph(stocks_to_scan, _fetch_eod_only, is_bear=is_bear, adr_bear=adr_bear)
+    signals = scan_all_graph(stocks_to_scan, _fetch_eod_only)
     if not signals:
         logger.info("EOD 신호 없음")
         return
 
     logger.info("EOD 신호 %d개 발생", len(signals))
+
+    # trend 에이전트 레짐 필터: KOSPI 종가 > KOSPI MA200
+    def _kospi_above_ma200() -> bool:
+        try:
+            import yfinance as yf
+            _k = yf.download("^KS11", period="250d", interval="1d", progress=False, auto_adjust=True)
+            if _k.empty:
+                return True
+            _c = float(_k["Close"].iloc[-1])
+            _m200 = float(_k["Close"].rolling(200).mean().iloc[-1])
+            return _c > _m200
+        except Exception:
+            return True  # 데이터 취득 실패 시 허용
+
+    _trend_allowed = _kospi_above_ma200()
 
     total_asset = 0.0
     if KIS_APP_KEY:
@@ -427,10 +439,13 @@ def scan_growth_signals_eod():
             total_asset = _get_total_asset(KISTrader())
         except Exception:
             pass
-    growth_cash = (total_asset * GROWTH_ASSET_RATIO) if total_asset > 0 else 10_000_000 * GROWTH_ASSET_RATIO
+    growth_cash = total_asset if total_asset > 0 else 10_000_000
 
     from pending_orders import add_pending_order
     for sig in signals:
+        if sig.get("agent") == "trend" and not _trend_allowed:
+            logger.info("[레짐 필터] trend 차단 — KOSPI ≤ MA200: %s", sig.get("ticker"))
+            continue
         ticker = sig["ticker"]
         is_us  = not (ticker.endswith(".KS") or ticker.endswith(".KQ"))
         atr    = sig.get("atr", 0)
@@ -549,7 +564,7 @@ def scan_growth_signals_eod_us():
     def _fetch_eod_only(ticker: str) -> pd.DataFrame:
         return _cached_fetch(ticker)
 
-    signals = scan_all_graph(stocks_to_scan, _fetch_eod_only, is_bear=False)
+    signals = scan_all_graph(stocks_to_scan, _fetch_eod_only)
     if not signals:
         logger.info("US EOD 신호 없음")
         return
@@ -562,7 +577,7 @@ def scan_growth_signals_eod_us():
             total_asset = _get_total_asset(KISTrader())
         except Exception:
             pass
-    growth_cash = (total_asset * GROWTH_ASSET_RATIO) if total_asset > 0 else 10_000_000 * GROWTH_ASSET_RATIO
+    growth_cash = total_asset if total_asset > 0 else 10_000_000
 
     for sig in signals:
         ticker = sig["ticker"]
@@ -826,48 +841,8 @@ def retrain_us_models(_is_retry: bool = False):
 
 
 def run_monthly_rebalance():
-    """매월 1일 오전 8시 30분 실행 — 안전자산 비중 재조정."""
-    if not is_bot_active():
-        return
-
-    now = datetime.now(KST)
-    if not is_kr_trading_day(now.date()):
-        return
-
-    logger.info("월간 리밸런싱 시작")
-    try:
-        from portfolio.rebalancer import run_monthly_rebalance as _rebalance
-
-        holdings = {}
-        total_asset = 10_000_000
-        if KIS_APP_KEY:
-            t        = KISTrader()
-            balance  = t.get_balance()
-            cash     = t.get_available_cash()
-            kr_val   = sum(h["qty"] * h["avg_price"] for h in balance)
-            holdings = {
-                h["stock_code"]: {"qty": h["qty"], "avg_price": h["avg_price"]}
-                for h in balance
-            }
-
-            # 미국주식 잔고 포함 (통합증거금)
-            try:
-                us_balance = t.get_us_balance()
-                for h in us_balance:
-                    sym = h["symbol"]
-                    # USD 평가액을 원화로 환산 (근사치 1400원/달러)
-                    usd_val = h["qty"] * h["avg_price"]
-                    holdings[sym] = {"qty": h["qty"], "avg_price": h["avg_price"], "currency": "USD"}
-                    kr_val += usd_val * 1400
-            except Exception as e:
-                logger.warning("미국주식 잔고 조회 실패 (리밸런싱 제외): %s", e)
-
-            total_asset = cash + kr_val
-
-        _rebalance(total_asset, holdings)
-    except Exception as e:
-        logger.error("월간 리밸런싱 실패: %s", e)
-        send_telegram(f"⚠️ 월간 리밸런싱 오류: {e}")
+    """폐기됨 — 안전자산 리밸런싱 없이 슬롯 분리 10+10 전략만 운용."""
+    logger.info("run_monthly_rebalance: 폐기된 호출 (슬롯 분리 10+10 전략)")
 
 
 def main():
@@ -909,11 +884,12 @@ def main():
     schedule.every().day.at("15:30").do(_run_paper_evaluate_kr_eod)     # KR EOD — trade_days+1 + TP/SL
     schedule.every().day.at("15:35").do(_run_paper_daily_report_kr)   # KR 마감 직후
     schedule.every().day.at("05:20").do(scan_growth_signals_eod_us)    # US EOD 신호 스캔 (서머타임, ET 16:20)
-    schedule.every().day.at("05:25").do(lambda: __import__('paper_trader').evaluate_positions_auto())   # US TP/SL (서머타임)
-    schedule.every().day.at("05:30").do(_run_paper_daily_report_us)   # US 마감 직후 (서머타임)
+    # US 페이퍼 트레이딩 폐기 (2026-06-19) — trend+reversion KR만 운용
+    # schedule.every().day.at("05:25").do(lambda: __import__('paper_trader').evaluate_positions_auto())   # US TP/SL (서머타임)
+    # schedule.every().day.at("05:30").do(_run_paper_daily_report_us)   # US 마감 직후 (서머타임)
     schedule.every().day.at("06:20").do(scan_growth_signals_eod_us)    # US EOD 신호 스캔 (동절기, ET 16:20)
-    schedule.every().day.at("06:25").do(lambda: __import__('paper_trader').evaluate_positions_auto())   # US TP/SL (동절기)
-    schedule.every().day.at("06:30").do(_run_paper_daily_report_us)   # US 마감 직후 (동절기)
+    # schedule.every().day.at("06:25").do(lambda: __import__('paper_trader').evaluate_positions_auto())   # US TP/SL (동절기)
+    # schedule.every().day.at("06:30").do(_run_paper_daily_report_us)   # US 마감 직후 (동절기)
     schedule.every().sunday.at("20:00").do(_run_paper_weekly_summary)
     schedule.every().day.at("22:30").do(retrain_us_models)   # 서머타임 미국장 시작
     schedule.every().day.at("22:30").do(lambda: execute_pending_orders("US"))  # 서머타임 US 예약 주문

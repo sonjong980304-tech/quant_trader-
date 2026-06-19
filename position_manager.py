@@ -110,7 +110,7 @@ def _check_activation():
             send_telegram(
                 "✅ <b>퀀트 봇 활성화!</b>\n"
                 "기존 보유 종목이 모두 매도됐습니다.\n"
-                "안전자산 포트폴리오 및 급등주 ML 전략을 시작합니다."
+                "reversion + trend 슬롯 분리 10+10 전략을 시작합니다."
             )
             return True
         else:
@@ -251,7 +251,7 @@ def check_ml_positions():
                 if trail_pct or trail_atr:
                     reason = f"트레일링스톱 (고점 {highest:.4f} → 현재 {cur_price:.4f})"
                     emoji  = "📉"
-            if reason is None and elapsed >= 7:
+            if reason is None and elapsed >= 7 and in_market:
                 reason = f"7거래일 경과 ({elapsed}일)"
 
             if reason is None:

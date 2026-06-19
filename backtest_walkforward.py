@@ -175,7 +175,6 @@ def walkforward_ticker(
       - 시장 레짐 ML: 코스피 200 기반 레짐이 하락장이면 신호 차단
     """
     from ml.features import add_features, FEATURE_COLS
-    from ml.regime_model import train_regime, predict_regime
 
     folds = _make_folds(df_daily)
     if not folds:
@@ -184,18 +183,10 @@ def walkforward_ticker(
     is_korean = _is_korean_ticker(ticker)
     trades: list[dict] = []
 
-    # 코스피 200 ETF 데이터 로드 (레짐 필터용, 한 번만 다운로드)
-    try:
-        kospi_df = _fetch_daily("069500.KS", years=6)
-    except Exception:
-        kospi_df = None
-        logger.warning("[%s] 코스피 200 데이터 로드 실패 — 레짐 필터 비활성화", ticker)
-
     for fold_i, (train_idx, test_idx) in enumerate(folds):
-        # ── 시장 레짐 모델 학습 (fold 학습 기간 기준) ─────────────
+        # ML 레짐 모델 비활성화 (레짐 필터 제거)
         regime_model = None
-        if kospi_df is not None:
-            regime_model = train_regime(kospi_df, train_idx[-1])
+        kospi_df = None
 
         # ── 피처 계산 (컨텍스트 보존) ─────────────────────────────
         context_df = df_daily[df_daily.index <= test_idx[-1]]
@@ -229,11 +220,7 @@ def walkforward_ticker(
                 if float(history["Close"].iloc[-1]) < ma200:
                     continue
 
-            # ③ 시장 레짐 ML 필터 (하락 레짐이면 skip)
-            if kospi_df is not None and not predict_regime(regime_model, kospi_df, signal_date):
-                continue
-
-            # ④ 진입: 다음 거래일 시가
+            # ③ 진입: 다음 거래일 시가
             future_all = df_daily[df_daily.index > signal_date]
             if len(future_all) < 2:
                 continue

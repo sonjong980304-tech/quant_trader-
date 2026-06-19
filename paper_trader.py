@@ -4,6 +4,9 @@ paper_trader.py — 페이퍼 트레이딩 엔진
 백테스트와 동일한 체결 가정 하에 신호를 기록하고,
 Circuit Breaker / P4 게이트 평가 / 일일 리포트를 제공한다.
 
+슬롯 분리 10+10 전략 (2026-06-19 채택):
+  reversion 전용 10슬롯 + trend 전용 10슬롯, 서로 침범 불가.
+
 LIVE_TRADING=False 상태에서만 동작. 실거래 API 호출 없음.
 """
 
@@ -30,22 +33,21 @@ POS_PATH        = os.path.join(_BASE_DIR, "paper_positions.json")
 META_PATH       = os.path.join(_BASE_DIR, "paper_meta.json")
 SNAPSHOT_PATH   = os.path.join(_BASE_DIR, "paper_params_snapshot.json")
 
-# ─── 백테스트 공유 비용 함수 (V7: 별도 구현 금지) ─────────────────────────────
-# _barrier_exit()는 OHLCV window 방식 → paper는 EOD Close 방식 (단, 장중 TP/SL은 fast_info 실시간가 사용)
-# _apply_costs()는 수치가 동일하므로 공유해서 drift 방지
+# ─── 백테스트 공유 비용 함수 (별도 구현 금지) ────────────────────────────────
 from backtest_walkforward import _apply_costs as _bt_apply_costs
 
-# ─── 백테스트와 동일한 파라미터 ────────────────────────────────────────────────
-TP_PCT         = 0.15    # +15% ← backtest_walkforward.TP_PCT 와 동기화 필수
-SL_PCT         = 0.06    # -6%  ← backtest_walkforward.SL_PCT
-MAX_HOLD_DAYS  = 7              # ← backtest_walkforward.HORIZON
-ASSUMED_SLIP   = 0.0005  # 가정 슬리피지 0.05% (익일 시초가 지정가 기준)
+# ─── config에서 파라미터 로드 ────────────────────────────────────────────────
+from config import (
+    PAPER_BACKTEST_EV_KR as PAPER_BACKTEST_EV,
+    TP_PCT, SL_PCT, EOD_SLIPPAGE_PCT, EOD_HORIZON,
+    REV_SLOTS, TR_SLOTS,
+)
+PAPER_BACKTEST_EV_US = None  # US 미운용
 
-# ─── 백테스트 기준 EV (V4: config에서 로드, 하드코딩 금지) ─────────────────────
-from config import PAPER_BACKTEST_EV_KR as PAPER_BACKTEST_EV
-from config import PAPER_BACKTEST_EV_US
-BACKTEST_EV    = PAPER_BACKTEST_EV    # KR: +1.468% (TP=15%/SL=6%, G1 채택)
-BACKTEST_EV_US = PAPER_BACKTEST_EV_US  # US: None (탐색적 운용 — 백테스트 미검증)
+BACKTEST_EV    = PAPER_BACKTEST_EV    # KR 백테스트 참고 EV
+MAX_HOLD_DAYS  = EOD_HORIZON          # reversion 보유기간 10거래일
+ASSUMED_SLIP   = EOD_SLIPPAGE_PCT     # 가정 슬리피지 0.05%
+# trend 에이전트: TP 없음, trailing stop 2.0×ATR + MA20 이탈 청산 (evaluate_positions에서 별도 처리)
 
 # ─── P3 Circuit Breaker 임계값 ────────────────────────────────────────────────
 CB_EV_30     = -0.005    # n≥30: EV ≤ -0.5%
@@ -98,26 +100,40 @@ def _today_kst() -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 슬롯 관리
+# ─────────────────────────────────────────────────────────────────────────────
+
+def can_add_position(agent: str) -> bool:
+    """에이전트별 슬롯 가용 여부 확인"""
+    positions = _load(POS_PATH, {})
+    limit = REV_SLOTS if agent == "reversion" else TR_SLOTS
+    count = sum(1 for p in positions.values() if p.get("agent") == agent)
+    return count < limit
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # P1-1. 신호 기록 — log_paper_signal()
 # ─────────────────────────────────────────────────────────────────────────────
 
 def log_paper_signal(
     ticker: str,
     name: str,
-    agent: str,                    # "momentum" | "reversion" | "eod"
-    trigger_types: list[str],
-    win_prob: float,
-    avg_win: float,
-    avg_loss: float,
-    rr: float,
-    regime_prob: float | None,
-    regime_pass: bool,
-    entry_price: float | None,     # None → 익일 시초가로 업데이트 예정 (2단계 체결)
-    actual_price: float | None,    # 실제 체결가 (호가 스프레드 계산용)
-    position_size_pct: float,
-    kelly_fraction: float | None,
-    auc_at_signal: float | None,   # 신호 시점 레짐 모델 AUC
-    eod_close: float | None = None,  # 신호 발생 시 EOD 종가 (갭 슬리피지 계산 기준)
+    signal: Any = None,           # 하위 호환용 (미사용)
+    entry_price: float | None = None,
+    agent: str = "reversion",     # "reversion" | "trend"
+    # 확장 파라미터 (선택)
+    trigger_types: list[str] | None = None,
+    win_prob: float = 0.0,
+    avg_win: float = 0.0,
+    avg_loss: float = 0.0,
+    rr: float = 0.0,
+    regime_prob: float | None = None,
+    regime_pass: bool = True,
+    actual_price: float | None = None,
+    position_size_pct: float = 0.0,
+    kelly_fraction: float | None = None,
+    auc_at_signal: float | None = None,
+    eod_close: float | None = None,
 ) -> str:
     """
     신호 기록. signal_id 반환.
@@ -126,11 +142,12 @@ def log_paper_signal(
       포지션 entry_price=None 저장 → update_entry_prices() 호출 후 실제 Open으로 확정.
       확정 전까지 evaluate_positions()에서 청산 체크 스킵.
 
-    entry_price=float 전달 시 기존 동작 (즉시 확정, 테스트 호환).
+    agent="reversion" | "trend" — 슬롯 분리 10+10 관리에 사용.
     """
     signal_id  = str(uuid.uuid4())[:8]
     now        = _now_kst()
     _eod_close = eod_close if eod_close else entry_price  # fallback
+    _triggers  = trigger_types or []
 
     # 실측 슬리피지 (actual 가격이 있을 때)
     actual_slip = None
@@ -143,7 +160,7 @@ def log_paper_signal(
         "ticker":                     ticker,
         "name":                       name,
         "agent":                      agent,
-        "trigger_types":              trigger_types,
+        "trigger_types":              _triggers,
         "win_prob":                   round(win_prob, 4),
         "avg_win":                    round(avg_win, 4),
         "avg_loss":                   round(avg_loss, 4),
@@ -179,6 +196,7 @@ def log_paper_signal(
         "signal_id":   signal_id,
         "ticker":      ticker,
         "name":        name,
+        "agent":       agent,
         "entry_price": entry_price,   # None 허용 — update_entry_prices()로 확정
         "eod_close":   _eod_close,
         "entry_date":  now,
@@ -192,9 +210,9 @@ def log_paper_signal(
     if "start_date" not in meta:
         meta["start_date"] = _today_kst()
         _save(META_PATH, meta)
-        snapshot_params()   # V5: 최초 신호 시 파라미터 동결
+        snapshot_params()   # 최초 신호 시 파라미터 동결
 
-    logger.info("[Paper] 신호 기록: %s %s %s (레짐=%s)", signal_id, ticker, agent, regime_pass)
+    logger.info("[Paper] 신호 기록: %s %s agent=%s (슬롯)", signal_id, ticker, agent)
     return signal_id
 
 
@@ -242,7 +260,6 @@ def evaluate_positions(price_map: dict[str, float], trade_day: bool = True) -> l
 
         if reason:
             raw_pnl = (exit_price - entry) / entry
-            # V7: backtest_walkforward._apply_costs() 공유 사용 — 별도 재구현 금지
             is_korean = ticker.endswith(".KS") or ticker.endswith(".KQ")
             net_pnl   = _bt_apply_costs(raw_pnl, is_korean)
 
@@ -263,6 +280,7 @@ def evaluate_positions(price_map: dict[str, float], trade_day: bool = True) -> l
                 "signal_id": sig_id,
                 "ticker":    ticker,
                 "name":      pos["name"],
+                "agent":     pos.get("agent", "reversion"),
                 "reason":    reason,
                 "net_pnl":   round(net_pnl * 100, 3),
                 "days":      pos["trade_days"],
@@ -277,7 +295,6 @@ def evaluate_positions(price_map: dict[str, float], trade_day: bool = True) -> l
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 현재가 자동 조회 청산 — evaluate_positions_auto()
-# check_ml_positions()와 동일한 주기로 runner에서 호출
 # ─────────────────────────────────────────────────────────────────────────────
 
 def evaluate_positions_auto(trade_day: bool = False) -> list[dict]:
@@ -310,8 +327,6 @@ def evaluate_positions_auto(trade_day: bool = False) -> list[dict]:
                 if ticker.endswith(".KS") or ticker.endswith(".KQ"):
                     code = ticker.replace(".KS", "").replace(".KQ", "")
                     price = float(_kis.get_current_price(code)["price"])
-                else:
-                    price = float(_kis.get_us_current_price(ticker)["price"])
         except Exception:
             pass
         if not price:
@@ -333,7 +348,7 @@ def evaluate_positions_auto(trade_day: bool = False) -> list[dict]:
             for c in closed:
                 send_telegram(
                     f"📋 <b>[페이퍼 청산]</b> {c['name']}({c['ticker']})\n"
-                    f"사유: {c['reason']} | 세후 {c['net_pnl']:+.3f}% | {c['days']}일 보유"
+                    f"[{c.get('agent','?')}] 사유: {c['reason']} | 세후 {c['net_pnl']:+.3f}% | {c['days']}일 보유"
                 )
         except Exception:
             pass
@@ -371,18 +386,15 @@ def log_auc(fold_id: int | str, auc: float):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def get_metrics(market: str | None = None) -> dict:
-    """누적 측정 지표 반환. market='KR'|'US'|None(전체)."""
+    """누적 측정 지표 반환. market='KR'|None(전체)."""
     trades  = _load(TRADES_PATH, [])
     meta    = _load(META_PATH, {})
-    # start_date 이후 기록만 현재 페이퍼 세션으로 집계 (이전 세션 거래 제외)
     start_date = meta.get("start_date")
     closed  = [t for t in trades
                if t["status"] == "closed"
                and (not start_date or t.get("timestamp", "") >= start_date)]
     if market == "KR":
         closed = [t for t in closed if _is_kr(t["ticker"])]
-    elif market == "US":
-        closed = [t for t in closed if not _is_kr(t["ticker"])]
 
     if not closed:
         start = meta.get("start_date")
@@ -419,9 +431,8 @@ def get_metrics(market: str | None = None) -> dict:
              if t.get("actual_slippage") is not None]
     avg_slip = float(np.mean(slips)) if slips else None
 
-    # 백테스트 갭 (US는 BACKTEST_EV_US=None이므로 갭 계산 불가)
-    _ref_ev = BACKTEST_EV_US if market == "US" else BACKTEST_EV
-    bt_gap = (ev - _ref_ev) if _ref_ev is not None else None
+    # 백테스트 갭
+    bt_gap = (ev - BACKTEST_EV) if BACKTEST_EV is not None else None
 
     # 운영 거래일
     start = meta.get("start_date")
@@ -452,7 +463,7 @@ def get_metrics(market: str | None = None) -> dict:
 
 def check_circuit_breaker(market: str | None = None) -> tuple[bool, str]:
     """
-    Circuit Breaker 조건 확인. market='KR'|'US'|None(전체).
+    Circuit Breaker 조건 확인.
     반환: (triggered: bool, reason: str)
     """
     m = get_metrics(market=market)
@@ -509,7 +520,7 @@ def _alert_circuit_breaker(reason: str, market: str | None = None):
 
 
 def is_circuit_breaker_active(market: str | None = None) -> bool:
-    """Circuit Breaker 상태 확인 (신호 발생 전 게이트). market='KR'|'US'|None."""
+    """Circuit Breaker 상태 확인 (신호 발생 전 게이트)."""
     triggered, _ = check_circuit_breaker(market=market)
     return triggered
 
@@ -587,12 +598,21 @@ def evaluate_live_gate() -> str:
 # 매 거래일 18:00 자동 호출
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _market_metrics_section(trades: list, m: dict, market: str, backtest_ev_val: float | None) -> list[str]:
-    """KR 또는 US 누적 지표 섹션 생성."""
-    label = "KR 누적 지표" if market == "KR" else "US 누적 지표 (탐색적 — 백테스트 기준 없음)"
+def _agent_slot_summary(positions: dict) -> list[str]:
+    """에이전트별 슬롯 현황 요약 라인 생성."""
+    rev_count = sum(1 for p in positions.values() if p.get("agent") == "reversion")
+    tr_count  = sum(1 for p in positions.values() if p.get("agent") == "trend")
+    return [
+        f"  [reversion] {rev_count}건 / 슬롯 {rev_count}/{REV_SLOTS}",
+        f"  [trend]     {tr_count}건 / 슬롯 {tr_count}/{TR_SLOTS}",
+    ]
+
+
+def _market_metrics_section(trades: list, m: dict, backtest_ev_val: float | None) -> list[str]:
+    """KR 누적 지표 섹션 생성."""
     lines: list[str] = [
         "",
-        f"<b>{label}</b>",
+        "<b>KR 누적 지표</b>",
         f"  거래수: {m['n']}건",
         f"  승률:   {m['win_rate']*100:.1f}%",
         f"  세후EV: {m['ev']*100:+.3f}%",
@@ -607,15 +627,14 @@ def _market_metrics_section(trades: list, m: dict, market: str, backtest_ev_val:
         slip_flag = "✅" if m["avg_actual_slip"] < 0.0015 else ("⚠️" if m["avg_actual_slip"] < 0.003 else "❌")
         lines.append(f"  실측 슬리피지: {m['avg_actual_slip']*100:.3f}% {slip_flag}")
 
-    # 청산 유형별 비율 (2주 페이퍼 핵심 지표)
-    closed_mkt = [t for t in trades if t.get("status") == "closed" and
-                  (_is_kr(t["ticker"]) if market == "KR" else not _is_kr(t["ticker"]))]
-    if closed_mkt:
-        n_all = len(closed_mkt)
+    # 청산 유형별 비율
+    closed_kr = [t for t in trades if t.get("status") == "closed" and _is_kr(t["ticker"])]
+    if closed_kr:
+        n_all = len(closed_kr)
         lines.append("")
-        lines.append(f"<b>{market} 청산 유형</b>")
+        lines.append("<b>KR 청산 유형</b>")
         for reason, rlabel in [("TP", "TP"), ("SL", "SL"), ("time", "기간만료")]:
-            subset = [t for t in closed_mkt if t.get("exit_reason") == reason]
+            subset = [t for t in closed_kr if t.get("exit_reason") == reason]
             cnt = len(subset)
             pct = cnt / n_all * 100
             if reason == "time" and subset:
@@ -625,14 +644,13 @@ def _market_metrics_section(trades: list, m: dict, market: str, backtest_ev_val:
             else:
                 lines.append(f"  {rlabel}: {cnt}건 ({pct:.0f}%)")
 
-    # 진행률 (KR만)
-    if market == "KR":
-        elapsed  = m.get("elapsed_days") or 0
-        lines.append("")
-        lines.append(f"  경과 {elapsed}일 / 14일  |  거래 {m['n']}건 / 50건 목표")
+    # 진행률
+    elapsed  = m.get("elapsed_days") or 0
+    lines.append("")
+    lines.append(f"  경과 {elapsed}일 / 14일  |  거래 {m['n']}건 / 50건 목표")
 
-    # 백테스트 vs 페이퍼 비교 (KR만, EV가 있을 때)
-    if market == "KR" and backtest_ev_val is not None:
+    # 백테스트 비교
+    if backtest_ev_val is not None:
         lines += [
             "",
             "<b>백테스트 기준 비교</b>",
@@ -650,65 +668,47 @@ def _market_metrics_section(trades: list, m: dict, market: str, backtest_ev_val:
 def daily_report(market: str | None = None) -> str:
     """
     일일 페이퍼 트레이딩 리포트 생성 및 텔레그램 전송.
-    market='KR' → KR 섹션만, 'US' → US 섹션만, None → KR+US 전체.
+    market='KR' → KR 섹션, None → KR 전체.
     """
     trades    = _load(TRADES_PATH, [])
     positions = _load(POS_PATH, {})
     today     = _today_kst()
 
-    # 오늘 신호 (market 필터 적용)
-    all_signals   = [t for t in trades if t["timestamp"].startswith(today)]
-    all_closed_td = [t for t in trades
-                     if t["status"] == "closed" and
-                     t.get("exit_timestamp", "").startswith(today)]
+    today_signals   = [t for t in trades if t["timestamp"].startswith(today)]
+    today_closed    = [t for t in trades
+                       if t["status"] == "closed" and
+                       t.get("exit_timestamp", "").startswith(today)]
 
-    if market == "KR":
-        today_signals = [s for s in all_signals   if _is_kr(s["ticker"])]
-        today_closed  = [c for c in all_closed_td if _is_kr(c["ticker"])]
-        pos_filtered  = {k: v for k, v in positions.items() if _is_kr(v["ticker"])}
-        mkt_label     = "KR"
-    elif market == "US":
-        today_signals = [s for s in all_signals   if not _is_kr(s["ticker"])]
-        today_closed  = [c for c in all_closed_td if not _is_kr(c["ticker"])]
-        pos_filtered  = {k: v for k, v in positions.items() if not _is_kr(v["ticker"])}
-        mkt_label     = "US"
-    else:
-        today_signals = all_signals
-        today_closed  = all_closed_td
-        pos_filtered  = positions
-        mkt_label     = "KR+US"
-
-    kr_sig = [s for s in today_signals if _is_kr(s["ticker"])]
-    us_sig = [s for s in today_signals if not _is_kr(s["ticker"])]
-    sig_detail = (f"KR: {len(kr_sig)}건 / US: {len(us_sig)}건"
-                  if market is None else f"{market}: {len(today_signals)}건")
+    mkt_label = "KR"
 
     lines = [
         f"📋 <b>[페이퍼/{mkt_label}] 일일 리포트 {today}</b>",
         "",
-        f"당일 신호: {len(today_signals)}건 ({sig_detail})",
+        f"당일 신호: {len(today_signals)}건",
     ]
 
     if today_signals:
         for s in today_signals:
             lines.append(
-                f"  • {s['name']}({s['ticker']}) "
-                f"레짐={s['regime_pass']} "
-                f"트리거={','.join(s['trigger_types'])}"
+                f"  • [{s.get('agent','?')}] {s['name']}({s['ticker']}) "
+                f"레짐={s['regime_pass']}"
             )
 
     lines.append(f"\n당일 청산: {len(today_closed)}건")
     for c in today_closed:
         icon = "✅" if c["is_win"] else "❌"
         lines.append(
-            f"  {icon} {c['name']}({c['ticker']}) "
+            f"  {icon} [{c.get('agent','?')}] {c['name']}({c['ticker']}) "
             f"{c['exit_reason']} {c['net_pnl_pct']:+.3f}%"
         )
 
-    # 미청산 포지션 (현재가·수익률 포함)
-    lines.append(f"\n미청산 포지션: {len(pos_filtered)}건")
-    for pos in pos_filtered.values():
+    # 미청산 포지션 슬롯 현황
+    lines.append(f"\n미청산 포지션: {len(positions)}건")
+    lines.extend(_agent_slot_summary(positions))
+
+    for pos in positions.values():
         entry = pos.get("entry_price")
+        agent_tag = pos.get("agent", "?")
         if entry:
             try:
                 from config import KIS_APP_KEY
@@ -719,59 +719,43 @@ def daily_report(market: str | None = None) -> str:
                     _tk = pos["ticker"]
                     if _tk.endswith(".KS") or _tk.endswith(".KQ"):
                         cur = float(_kt.get_current_price(_tk.replace(".KS","").replace(".KQ",""))["price"])
-                    else:
-                        cur = float(_kt.get_us_current_price(_tk)["price"])
                 if not cur:
                     import yfinance as yf
                     cur = yf.Ticker(pos["ticker"]).fast_info.last_price or 0
                 pnl = (cur - entry) / entry * 100
                 arrow = "▲" if pnl >= 0 else "▼"
                 lines.append(
-                    f"  • {pos['name']}({pos['ticker']}) "
+                    f"  • [{agent_tag}] {pos['name']}({pos['ticker']}) "
                     f"진입 {entry:,.0f}원 → 현재 {cur:,.0f}원 "
                     f"{arrow}{abs(pnl):.2f}% ({pos['trade_days']}일)"
                 )
             except Exception:
                 lines.append(
-                    f"  • {pos['name']}({pos['ticker']}) "
+                    f"  • [{agent_tag}] {pos['name']}({pos['ticker']}) "
                     f"진입 {entry:,.0f}원 ({pos['trade_days']}일 경과)"
                 )
         else:
             lines.append(
-                f"  • {pos['name']}({pos['ticker']}) "
+                f"  • [{agent_tag}] {pos['name']}({pos['ticker']}) "
                 f"시초가 미확정 — 내일 진입 예정"
             )
 
-    # ── KR 섹션 ──────────────────────────────────────────────────────────────
-    if market in (None, "KR"):
-        m_kr = get_metrics(market="KR")
-        lines.extend(_market_metrics_section(trades, m_kr, "KR", BACKTEST_EV))
-        cb_kr, cb_kr_reason = check_circuit_breaker(market="KR")
-        if cb_kr:
-            lines += ["", f"🚨 <b>KR Circuit Breaker 발동</b>: {cb_kr_reason}"]
-        else:
-            lines.append("\n✅ KR Circuit Breaker: 정상")
+    # KR 누적 지표
+    m_kr = get_metrics(market="KR")
+    lines.extend(_market_metrics_section(trades, m_kr, BACKTEST_EV))
+    cb_kr, cb_kr_reason = check_circuit_breaker(market="KR")
+    if cb_kr:
+        lines += ["", f"🚨 <b>KR Circuit Breaker 발동</b>: {cb_kr_reason}"]
+    else:
+        lines.append("\n✅ KR Circuit Breaker: 정상")
 
-    # ── US 섹션 ──────────────────────────────────────────────────────────────
-    if market in (None, "US"):
-        m_us = get_metrics(market="US")
-        if m_us["n"] > 0 or market == "US":
-            lines.extend(_market_metrics_section(trades, m_us, "US", BACKTEST_EV_US))
-            if market == "US":
-                lines.append("  (백테스트 기준 없음 — 탐색적 운용)")
-            cb_us, cb_us_reason = check_circuit_breaker(market="US")
-            if cb_us:
-                lines += ["", f"🚨 <b>US Circuit Breaker 발동</b>: {cb_us_reason}"]
-            else:
-                lines.append("\n✅ US Circuit Breaker: 정상")
-
-    # V5: 파라미터 drift 체크
+    # 파라미터 drift 체크
     drifts = check_param_drift()
     if drifts:
         lines += ["", "<b>⚠️ 파라미터 변경 감지 (카운트 리셋 필요)</b>"]
         lines.extend(f"  {d}" for d in drifts)
 
-    # V6: 로직 변경 이력
+    # 로직 변경 이력
     meta    = _load(META_PATH, {})
     history = meta.get("logic_change_history", [])
     if history:
@@ -810,6 +794,8 @@ def snapshot_params() -> dict:
         "SL_PCT":           SL_PCT,
         "HORIZON":          MAX_HOLD_DAYS,
         "BACKTEST_EV":      BACKTEST_EV,
+        "REV_SLOTS":        REV_SLOTS,
+        "TR_SLOTS":         TR_SLOTS,
     }
     _save(SNAPSHOT_PATH, params)
     logger.info("[Paper] 파라미터 스냅샷 저장: %s", params)
@@ -837,7 +823,7 @@ def check_param_drift() -> list[str]:
 
     drifts = []
     for key, snap_val in snap.items():
-        if key in ("snapshot_date", "BACKTEST_EV"):
+        if key in ("snapshot_date", "BACKTEST_EV", "REV_SLOTS", "TR_SLOTS"):
             continue
         cur_val = current.get(key)
         if cur_val is not None and abs(float(cur_val) - float(snap_val)) > 1e-9:
@@ -890,7 +876,7 @@ def register_logic_change(reason: str):
 
 def update_entry_prices(market: str) -> list[str]:
     """
-    KR: 09:05 KST, US: ET 09:35 이후 호출.
+    KR: 09:05 KST 이후 호출.
     entry_price=None인 포지션에 실제 시초가(Open)를 기록.
     반환: 업데이트된 종목 요약 목록.
     """
@@ -900,7 +886,7 @@ def update_entry_prices(market: str) -> list[str]:
     pending = {
         k: v for k, v in positions.items()
         if v.get("entry_price") is None
-        and (_is_kr(v["ticker"]) if market == "KR" else not _is_kr(v["ticker"]))
+        and _is_kr(v["ticker"])
     }
     if not pending:
         return []
@@ -908,7 +894,7 @@ def update_entry_prices(market: str) -> list[str]:
     tickers   = list({pos["ticker"] for pos in pending.values()})
     open_map: dict[str, float] = {}
 
-    # ── 1순위: KIS API (당일 시가 stck_oprc) — 실매매 로직과 동일한 소스 ──────
+    # ── 1순위: KIS API (당일 시가 stck_oprc) ─────────────────────────────────
     if market == "KR":
         try:
             from config import KIS_APP_KEY
@@ -928,7 +914,7 @@ def update_entry_prices(market: str) -> list[str]:
         except Exception as e:
             logger.warning("[Paper] KIS 초기화 실패, FDR 폴백: %s", e)
 
-    # ── 2순위: FDR (KIS 미조회 종목 또는 US) ─────────────────────────────────
+    # ── 2순위: FDR ────────────────────────────────────────────────────────────
     remaining = [t for t in tickers if t not in open_map]
     if remaining:
         try:
@@ -949,7 +935,7 @@ def update_entry_prices(market: str) -> list[str]:
         except ImportError:
             pass
 
-    # ── 3순위: yfinance (FDR도 실패한 종목) ──────────────────────────────────
+    # ── 3순위: yfinance ───────────────────────────────────────────────────────
     remaining = [t for t in tickers if t not in open_map]
     if remaining:
         try:
@@ -970,8 +956,6 @@ def update_entry_prices(market: str) -> list[str]:
                             logger.info("[Paper] yfinance 시초가: %s open=%s", ticker, val)
                 except Exception:
                     pass
-        except ImportError:
-            pass
         except ImportError:
             logger.warning("[Paper] 시초가 조회 라이브러리 없음 (fdr/yf)")
             return []
@@ -1041,6 +1025,11 @@ def weekly_summary() -> str:
         f"  백테스트 갭: {m['backtest_gap']*100:+.3f}%p" if m['backtest_gap'] is not None else "",
         f"  운영 {m['elapsed_days']}거래일 경과 (목표 {GATE_DAYS}일)",
     ]
+
+    # 슬롯 현황
+    positions = _load(POS_PATH, {})
+    lines.append("")
+    lines.extend(_agent_slot_summary(positions))
 
     try:
         from notifier import send_telegram

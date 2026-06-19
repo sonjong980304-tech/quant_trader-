@@ -188,73 +188,10 @@ def _llm_decide_rebalance(
 # 메인 진입점
 # ─────────────────────────────────────────────
 
-def run_monthly_rebalance(total_asset: float, current_holdings: dict):
-    """
-    월 1회 리밸런싱 실행.
-
-    total_asset       : 전체 자산 (현금 + 평가액)
-    current_holdings  : {ticker: {"qty": int, "avg_price": float}}
-    """
-    from config import SAFE_ASSET_RATIO
-
-    now = datetime.now()
-    logger.info("월간 리밸런싱 시작 (%s)", now.strftime("%Y-%m"))
-
-    send_telegram(
-        f"🔄 <b>월간 포트폴리오 리밸런싱 시작</b>\n"
-        f"{now.strftime('%Y년 %m월')} — 최신 5개년 데이터 기준"
-    )
-
-    try:
-        # 1. 데이터 수집
-        logger.info("  데이터 수집 중...")
-        prices_df = _fetch_5y_prices()
-
-        # 2. 몬테카를로
-        logger.info("  몬테카를로 시뮬레이션 %d회 실행 중...", N_SIMULATIONS)
-        result = run_monte_carlo(prices_df)
-
-        # 3. 현재가 조회
-        current_prices = {}
-        for ticker in SAFE_TICKERS:
-            try:
-                t = yf.Ticker(ticker)
-                current_prices[ticker] = float(t.fast_info.last_price or 0)
-            except Exception:
-                current_prices[ticker] = 0.0
-
-        # 4. LLM 수량 결정
-        safe_budget = total_asset * SAFE_ASSET_RATIO
-        logger.info("  LLM 리밸런싱 수량 결정 중...")
-        llm_advice = _llm_decide_rebalance(
-            result, safe_budget, current_holdings, current_prices
-        )
-
-        # 5. 결과 전송
-        weights_lines = "\n".join(
-            f"  {SAFE_TICKERS.get(t, t)}: {w*100:.1f}%"
-            for t, w in result["weights"].items()
-        )
-        send_telegram(
-            f"📊 <b>몬테카를로 최적 비중 ({now.strftime('%Y.%m')})</b>\n"
-            f"데이터: {result['period_start']} ~ {result['period_end']}\n\n"
-            f"{weights_lines}\n\n"
-            f"예상 수익률: {result['annual_return']*100:.1f}%\n"
-            f"변동성:     {result['annual_vol']*100:.1f}%\n"
-            f"샤프비율:   {result['sharpe']:.3f}"
-        )
-        send_telegram(
-            f"🤖 <b>LLM 리밸런싱 결정</b>\n\n{llm_advice}"
-        )
-
-        # 6. config의 SAFE_WEIGHTS 갱신 (런타임 반영)
-        _update_safe_weights(result["weights"])
-
-        logger.info("  월간 리밸런싱 완료")
-
-    except Exception as e:
-        logger.error("월간 리밸런싱 실패: %s", e)
-        send_telegram(f"⚠️ 월간 리밸런싱 오류: {e}")
+def run_monthly_rebalance(*args, **kwargs):
+    """안전자산 리밸런싱 — 폐기됨 (2026-06-19). 슬롯 분리 10+10 전략으로 전환."""
+    import logging
+    logging.getLogger(__name__).info("run_monthly_rebalance: 폐기된 함수. 아무 작업도 하지 않음.")
 
 
 def _update_safe_weights(new_weights: dict):

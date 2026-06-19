@@ -31,6 +31,7 @@ def compute_rsi(close: pd.Series, period: int = 14) -> pd.Series:
 
 def add_features(
     df: pd.DataFrame,
+    kospi_df: pd.DataFrame | None = None,
     ema_period: int = 20,
     bb_period: int = 20,
     rsi_period: int = 14,
@@ -72,10 +73,19 @@ def add_features(
     pct_b_denom                 = (bb_upper - bb_lower).replace(0, np.nan)
     df[f"bb_pct_{bb_period}"]   = (df["Close"] - bb_lower) / pct_b_denom
 
-    # ── 거래량 비율 ───────────────────────────────────
+    # ── 거래량 비율 / 추세 ──────────────────────────────
     vol_ma               = df["Volume"].rolling(20).mean()
     df["volume_ma20"]    = vol_ma
     df["volume_ratio"]   = df["Volume"] / vol_ma.replace(0, np.nan)
+    vol_5d_ma            = df["Volume"].rolling(5).mean()
+    df["turnover_trend"] = vol_5d_ma / vol_ma.replace(0, np.nan)
+    df["volume_surge_5d"] = df["turnover_trend"]  # 별칭
+
+    # ── 모멘텀 변동성 (20일 일간수익률 표준편차) ─────────
+    df["mom_volatility"] = df["Close"].pct_change().rolling(20).std()
+
+    # ── 섹터 모멘텀 (gridsearch에서 합산 후 덮어씀) ──────
+    df["sector_momentum_5d"] = np.nan
 
     # ── 캔들 형태 ─────────────────────────────────────
     open_safe            = df["Open"].replace(0, np.nan)
@@ -86,7 +96,7 @@ def add_features(
     df["candle_lower_wick"]  = (candle_bottom - df["Low"])   / open_safe
 
     # ── 모멘텀 수익률 ─────────────────────────────────
-    for w in [3, 5, 10]:
+    for w in [3, 5, 10, 20, 60]:
         df[f"ret_{w}d"] = df["Close"].pct_change(w)
 
     # ── 변동성 ───────────────────────────────────────
@@ -100,10 +110,63 @@ def add_features(
         (df["Low"]  - prev_close).abs(),
     ], axis=1).max(axis=1)
     df["atr_14"]  = tr.rolling(14).mean()
-    df["atr_pct"] = df["atr_14"] / df["Close"].replace(0, np.nan)  # 가격 정규화
+    df["atr_pct"] = df["atr_14"] / df["Close"].replace(0, np.nan)
 
-    # ── MA200 (추세 필터용, 피처 아님) ───────────────────
-    df["ma200"] = df["Close"].rolling(200).mean()
+    # ── 52주 고저 이격도 ──────────────────────────────
+    high52         = df["Close"].rolling(252).max()
+    low52          = df["Close"].rolling(252).min()
+    df["high52_pct"] = (df["Close"] - high52) / high52.replace(0, np.nan)
+    df["low52_pct"]  = (df["Close"] - low52)  / low52.replace(0, np.nan)
+
+    # ── OBV 변화율 (5일) ─────────────────────────────
+    close_sq  = df["Close"].squeeze()
+    vol_sq    = df["Volume"].squeeze()
+    obv       = (vol_sq * np.sign(close_sq - close_sq.shift(1))).fillna(0).cumsum()
+    df["obv"] = obv
+    obv_5d_ago          = obv.shift(5)
+    df["obv_change_5d"] = (obv - obv_5d_ago) / (obv_5d_ago.abs() + 1e-9)
+
+    # ── RSI 과매도 깊이 ───────────────────────────────
+    df["rsi_oversold"] = (30 - df["rsi"]).clip(lower=0)
+
+    # ── KOSPI 상대 수익률 ────────────────────────────
+    if kospi_df is not None:
+        try:
+            kospi_close  = kospi_df["Close"].squeeze()
+            kospi_ret5   = kospi_close.pct_change(5).reindex(df.index, method="ffill")
+            kospi_ret20  = kospi_close.pct_change(20).reindex(df.index, method="ffill")
+            df["kospi_relative_5d"]  = df["ret_5d"]  - kospi_ret5
+            df["kospi_relative_20d"] = df["ret_20d"] - kospi_ret20
+            # beta_60d: 60일 롤링 KOSPI 대비 베타
+            kospi_daily = kospi_close.pct_change().reindex(df.index, method="ffill")
+            stock_daily = df["Close"].pct_change()
+            cov60 = stock_daily.rolling(60).cov(kospi_daily)
+            var60 = kospi_daily.rolling(60).var()
+            df["beta_60d"] = cov60 / var60.replace(0, np.nan)
+        except Exception:
+            df["kospi_relative_5d"]  = np.nan
+            df["kospi_relative_20d"] = np.nan
+            df["beta_60d"]           = np.nan
+    else:
+        df["kospi_relative_5d"]  = np.nan
+        df["kospi_relative_20d"] = np.nan
+        df["beta_60d"]           = np.nan
+
+    # ── 이동평균 및 눌림목 피처 ──────────────────────────
+    _c            = df["Close"]
+    _ma5          = _c.rolling(5).mean()
+    _ma20         = _c.rolling(20).mean()
+    _ma60         = _c.rolling(60).mean()
+    _ma200        = _c.rolling(200).mean()
+    df["ma200"]           = _ma200
+    df["ma200_deviation"] = (_c - _ma200) / _ma200.replace(0, np.nan)
+    df["ma20_deviation"]  = (_c - _ma20)  / _ma20.replace(0, np.nan)
+    df["ma_alignment"]    = ((_ma5 > _ma20) & (_ma20 > _ma60)).astype(float)
+    _high20               = _c.rolling(20).max()
+    df["pullback_depth"]  = (_high20 - _c) / _high20.replace(0, np.nan)
+    # ma20_cross: 최근 3일 내 MA20 상향 돌파 (0/1)
+    _cross = (_c.shift(1) < _ma20.shift(1)) & (_c >= _ma20)
+    df["ma20_cross"] = _cross.rolling(3).max().astype(float)
 
     # inf 값은 dropna로 걸러지지 않으므로 NaN으로 치환
     df.replace([np.inf, -np.inf], np.nan, inplace=True)
@@ -111,13 +174,12 @@ def add_features(
     return df
 
 
-# 모델에 사용할 피처 컬럼 목록
+# ── 전역 momentum 모델 피처 (17개, 레거시) ─────────────────────────────────
 FEATURE_COLS = [
     "change_rate",
     "volume_change",
     "rsi",
     "ema_deviation_20",
-    "bb_width_20",
     "bb_pct_20",
     "bb_std_20",
     "volume_ratio",
@@ -127,25 +189,105 @@ FEATURE_COLS = [
     "ret_3d",
     "ret_5d",
     "ret_10d",
-    "volatility_10d",
-    "atr_pct",             # Phase 4: ATR 정규화 (변동성 인식)
+    "atr_pct",
+    "high52_pct",
+    "low52_pct",
+    "kospi_relative_5d",
+]
+
+# ── 전역 momentum 모델 피처 — 52주 고점 모멘텀 (17개) ──────────────────────
+FEATURE_COLS_MOMENTUM = [
+    "high52_pct",         # 52주 고점 근접도 (핵심)
+    "ma200_deviation",    # 장기 추세
+    "mom_volatility",     # 20일 수익률 변동성
+    "turnover_trend",     # 거래량 추세 (5일/20일)
+    "volume_ratio",       # 거래량 비율
+    "rsi",
+    "bb_pct_20",
+    "bb_std_20",
+    "atr_pct",
+    "ret_5d",
+    "ret_10d",
+    "kospi_relative_5d",
+    "candle_body",
+    "ema_deviation_20",
+    "ma20_deviation",
+    "ma_alignment",
+    "ret_3d",
+]
+
+# ── 전역 midterm momentum 모델 피처 — 섹터 순환매 + 주도주 (8개) ────────────
+FEATURE_COLS_MIDTERM_MOMENTUM = [
+    "atr_pct",             # 가격 정규화 변동성
+    "kospi_relative_20d",  # 20일 상대강도
+    "beta_60d",            # 시장 베타
+    "ma200_deviation",     # 장기 추세
+    "ret_60d",             # 12주 모멘텀
+    "ret_20d",             # 중기 모멘텀
+    "high52_pct",          # 52주 고점 근접도
+    "kospi_relative_5d",   # 5일 상대강도
+]
+
+# ── 전역 reversion 모델 피처 (12개) ─────────────────────────────────────────
+# 제거: sector_relative_5d(12위), obv_change_5d(14위), volume_ratio(15위), volume_change(16위)
+FEATURE_COLS_REVERSION = [
+    "kospi_relative_5d",
+    "low52_pct",
+    "ret_5d",
+    "bb_pct_20",
+    "high52_pct",
+    "ret_3d",
+    "bb_std_20",
+    "atr_pct",
+    "rsi",
+    "candle_body",
+    "ema_deviation_20",
+    "rsi_oversold",
 ]
 
 
 def detect_momentum_rows(df: pd.DataFrame) -> pd.Series:
-    """돌파 에이전트 학습용: ① 거래량폭발 OR ⑤ BB스퀴즈돌파 조건이 발생한 행."""
-    if "volume_ratio" not in df.columns:
+    """52주 고점 모멘텀 진입 후보 필터 (예측 시 사용, 학습에는 미적용).
+
+    ① Close > MA200 (장기 상승 추세)
+    ② high52_pct >= -0.10 (52주 고점 10% 이내)
+    ③ 최근 3일 중 거래량 > 20일 평균 1일 이상
+    """
+    if "mom_volatility" not in df.columns:
         df = add_features(df)
 
-    # ① 거래량폭발: volume_ratio > 1.5 + 양봉 (학습용은 1.5로 완화 — 2.0은 데이터 부족)
-    vol_explode = (df["volume_ratio"] > 1.5) & (df["candle_body"] > 0)
+    trend_up  = df["ma200_deviation"] > 0
+    near_52w  = df["high52_pct"] >= -0.10
 
-    # ⑤ BB스퀴즈돌파: 전일 BB폭이 60일 최저 근처 + 금일 종가가 BB상단 돌파
-    bb_upper = df["bb_mid_20"] + 2 * df["bb_std_20"]
-    min_w60  = df["bb_width_20"].rolling(60).min().shift(1)
-    bb_squeeze = (df["bb_width_20"].shift(1) <= min_w60 * 1.1) & (df["Close"] > bb_upper)
+    vol_above   = (df["Volume"] > df["volume_ma20"]).astype(int)
+    vol_recent3 = vol_above.rolling(3).sum() >= 1
 
-    return (vol_explode | bb_squeeze).fillna(False)
+    return (trend_up & near_52w & vol_recent3).fillna(False)
+
+
+def detect_midterm_momentum_rows(df: pd.DataFrame) -> pd.Series:
+    """중기 모멘텀 진입 후보 필터 (예측 시 사용, 학습에는 미적용).
+
+    ① 섹터 5일 수익률 > KOSPI 5일 수익률 + 2% (sector_momentum_5d 있을 때만)
+    ② Close > MA20
+    ③ Close > MA200
+    ④ Volume > 20일 평균 * 1.5
+    """
+    if "beta_60d" not in df.columns:
+        df = add_features(df)
+
+    above_ma20  = df["ma20_deviation"] > 0
+    above_ma200 = df["ma200_deviation"] > 0
+    vol_surge   = df["volume_ratio"] > 1.5
+
+    if (df.get("sector_momentum_5d") is not None
+            and df["sector_momentum_5d"].notna().any()):
+        kospi_ret5   = df["ret_5d"] - df["kospi_relative_5d"].fillna(0)
+        sector_ok    = df["sector_momentum_5d"] > (kospi_ret5 + 0.02)
+    else:
+        sector_ok = pd.Series(True, index=df.index)
+
+    return (sector_ok & above_ma20 & above_ma200 & vol_surge).fillna(False)
 
 
 def detect_reversion_rows(df: pd.DataFrame) -> pd.Series:
