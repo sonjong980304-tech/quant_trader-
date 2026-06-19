@@ -15,7 +15,7 @@
 
 ## 주요 파일
 - `backtest_ml.py` — 최근 1개월 ML 백테스트
-- `runner.py` — EOD 스케줄러 (15:31 KR / 05:20·06:20 US EOD 신호 스캔 + 리밸런싱)
+- `runner.py` — EOD 스케줄러 (15:31 KR EOD 신호 스캔, reversion+trend 슬롯분리 운용)
 - `telegram_bot.py` — 텔레그램 봇
 - `langchain_agent.py` — LangChain AI 어시스턴트
 - `trader.py` — KIS API (국내 + 미국주식)

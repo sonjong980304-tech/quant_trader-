@@ -1,6 +1,5 @@
 """
-strategy.py - 매수/매도 신호 생성
-5일/20일 이동평균선 + 거래량 + 캔들 타입 기반 전략
+strategy.py - Reversion 트리거 탐지 (Mean Reversion ML 신호 생성)
 """
 
 import pandas as pd
