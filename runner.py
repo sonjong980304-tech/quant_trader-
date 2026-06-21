@@ -297,7 +297,10 @@ def _run_paper_evaluate_kr_eod():
 
 
 def _run_paper_daily_report_kr():
-    """15:35 KR 페이퍼 트레이딩 일일 리포트 (한국 증시 마감 직후)."""
+    """15:35 KR 페이퍼 트레이딩 일일 리포트 (한국 증시 마감 직후, 평일만)."""
+    from datetime import datetime
+    if datetime.now().weekday() >= 5:   # 토(5)·일(6) 스킵
+        return
     try:
         from paper_trader import daily_report
         daily_report(market="KR")
