@@ -942,18 +942,6 @@ def main():
     except Exception as _e:
         logger.warning("로직 변경 등록 실패: %s", _e)
 
-    # G1 그리드 채택 — SL -7%→-6%, TP 7%→15%, 2주 페이퍼 시작 (이미 등록된 경우 skip)
-    try:
-        from datetime import date as _date
-        from paper_trader import _load, META_PATH, register_logic_change, snapshot_params
-        _hist = _load(META_PATH, {}).get("logic_change_history", [])
-        if not any("G1" in h.get("reason", "") for h in _hist):
-            register_logic_change(
-                f"G1: SL -7%→-6%, TP 7%→15%, EOD 익일시초가 진입 — 2주 페이퍼 시작 {_date.today()}"
-            )
-            snapshot_params()
-    except Exception as _e:
-        logger.warning("G1 로직 변경 등록 실패: %s", _e)
 
     schedule.clear()
 
