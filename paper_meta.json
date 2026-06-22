@@ -5,7 +5,13 @@
       "reason": "전략 전환: reversion(XGBoost, SL=-8%/TP=+15%/10일) + trend(ADX≥25/MA정배열/trailing stop 2×ATR/60일) 슬롯분리 10+10",
       "prev_start_date": "2026-06-19",
       "trades_archived": 0
+    },
+    {
+      "date": "2026-06-22",
+      "reason": "B1: EOD 익일 시초가 진입 전략 교체 (slip 0.25%→0.05%)",
+      "prev_start_date": "2026-06-20",
+      "trades_archived": 0
     }
   ],
-  "start_date": "2026-06-20"
+  "start_date": "2026-06-22"
 }
