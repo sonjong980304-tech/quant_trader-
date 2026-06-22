@@ -1,12 +1,12 @@
 {
-  "snapshot_date": "2026-06-19",
+  "snapshot_date": "2026-06-22",
   "MIN_WIN_PROB": 0.6,
   "MIN_RR": 1.5,
   "regime_threshold": 0.5,
   "TP_PCT": 0.15,
   "SL_PCT": 0.08,
   "HORIZON": 10,
-  "BACKTEST_EV": 0.01468,
+  "BACKTEST_EV": 0.01301,
   "REV_SLOTS": 10,
   "TR_SLOTS": 10
 }
