@@ -394,8 +394,8 @@ def scan_growth_signals_eod():
 
     logger.info("EOD 신호 스캔 시작 (15:31)")
 
-    from signals.krx_universe import get_krx_candidates
-    stocks_to_scan = get_krx_candidates(top_n=100)
+    from signals.krx_universe import get_krx_backtest_universe
+    stocks_to_scan = get_krx_backtest_universe(top_n=200)
     if not stocks_to_scan:
         stocks_to_scan = STOCKS
 
