@@ -911,10 +911,21 @@ def retrain_kr_models(_is_retry: bool = False):
             if _retrain_retry_kr:
                 _retrain_retry_kr.cancel()
                 _retrain_retry_kr = None
+            # AUC / 승률 집계
+            metrics_list = [v for v in results.values() if v]
+            avg_auc      = sum(m["auc"] for m in metrics_list) / len(metrics_list) if metrics_list else 0.0
+            avg_winrate  = sum(m.get("win_rate", m.get("avg_win", 0)) for m in metrics_list) / len(metrics_list) if metrics_list else 0.0
+            nxt          = next_retrain_date()
             send_telegram(
-                f"🤖 <b>KR ML 모델 재학습 완료</b>\n"
-                f"성공: {ok}개 / 실패: {fail}개\n"
-                f"{now.strftime('%Y-%m-%d %H:%M')} 기준"
+                f"🤖 <b>KR ML 분기별 재학습 완료</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n"
+                f"📅 완료: {now.strftime('%Y-%m-%d %H:%M')}\n"
+                f"📊 유니버스: PIT 시총 상위 200개\n"
+                f"✅ 성공: {ok}개 / ❌ 실패: {fail}개\n"
+                f"📈 평균 AUC: {avg_auc:.4f}\n"
+                f"🎯 평균 승률: {avg_winrate*100:.1f}%\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n"
+                f"🗓 다음 재학습: {nxt}"
             )
     except Exception as e:
         logger.error("KR ML 재학습 실패: %s", e)
