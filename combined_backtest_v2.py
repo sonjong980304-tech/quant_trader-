@@ -394,6 +394,11 @@ def build_signals(fold_models, universe_by_year: dict | None = None):
             wp = float(model.predict_proba(Xp)[0, 1])
             if wp < REV_WP:
                 continue
+            # 손익비 게이트 — 라이브 _eval_agent와 동일
+            _ev_win  = wp * _REV_AVG_WIN
+            _ev_loss = (1 - wp) * _REV_AVG_LOSS
+            if _ev_loss > 0 and (_ev_win / _ev_loss) < REV_RR:
+                continue
             atr_v = 0.0
             di = ind_data.get(t)
             if di is not None:
