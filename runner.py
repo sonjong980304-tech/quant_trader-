@@ -893,12 +893,21 @@ def retrain_kr_models(_is_retry: bool = False):
         from ml.model import _model_path as _mp
         from ml.trainer import retrain_daily
 
-        # 기존 전역 모델 백업 (AUC 미달 시 복원용)
+        # 기존 전역 모델 백업 (AUC / avg_win 미달 시 복원용)
+        import pickle as _pkl
         model_path  = _mp("_global", "reversion")
         backup_path = model_path + ".bak"
+        old_auc = old_avg_win = 0.0
         if _os.path.exists(model_path):
             shutil.copy2(model_path, backup_path)
-            logger.info("기존 모델 백업 완료: %s", backup_path)
+            try:
+                _old = _pkl.load(open(backup_path, "rb"))
+                old_auc     = _old["metrics"].get("auc",     0.0)
+                old_avg_win = _old["metrics"].get("avg_win", 0.0)
+            except Exception:
+                pass
+            logger.info("기존 모델 백업 완료: AUC=%.4f avg_win=%.1f%%",
+                        old_auc, old_avg_win * 100)
 
         results = retrain_daily(market="kr", period="3y")
         ok   = sum(1 for v in results.values() if v)
