@@ -284,180 +284,183 @@ def run_backtest(
     }
 
 
-# ════════════════════════════════════════════════════════════════════════════
-# 데이터 준비
-# ════════════════════════════════════════════════════════════════════════════
-print("KOSPI 다운로드 (4년치)...")
-kospi_raw = yf.download("^KS11", period="4y", auto_adjust=True, progress=False)
-if isinstance(kospi_raw.columns, pd.MultiIndex):
-    kospi_raw.columns = kospi_raw.columns.get_level_values(0)
-kospi_raw.index = _strip_tz(kospi_raw.index)
-kospi_ind    = compute_indicators(kospi_raw)
-kospi_ma200  = kospi_ind["ma200"].dropna()
-kospi_close  = kospi_raw["Close"]
+if __name__ == "__main__":
+    # 그리드 서치 백테스트는 이 파일을 직접 실행할 때만 동작한다.
+    # (compute_indicators 등을 import할 때 200종목 다운로드·백테스트가 도는 부작용 방지)
+    # ════════════════════════════════════════════════════════════════════════════
+    # 데이터 준비
+    # ════════════════════════════════════════════════════════════════════════════
+    print("KOSPI 다운로드 (4년치)...")
+    kospi_raw = yf.download("^KS11", period="4y", auto_adjust=True, progress=False)
+    if isinstance(kospi_raw.columns, pd.MultiIndex):
+        kospi_raw.columns = kospi_raw.columns.get_level_values(0)
+    kospi_raw.index = _strip_tz(kospi_raw.index)
+    kospi_ind    = compute_indicators(kospi_raw)
+    kospi_ma200  = kospi_ind["ma200"].dropna()
+    kospi_close  = kospi_raw["Close"]
 
-print("유니버스 로드...")
-from signals.krx_universe import get_krx_backtest_universe
-tickers = list(get_krx_backtest_universe(top_n=200).keys())
+    print("유니버스 로드...")
+    from signals.krx_universe import get_krx_backtest_universe
+    tickers = list(get_krx_backtest_universe(top_n=200).keys())
 
-print(f"티커 데이터 다운로드 ({len(tickers)}개)...")
-raw_data: dict[str, pd.DataFrame] = {}
-for ticker in tickers:
-    try:
-        df = yf.download(ticker, period="4y", auto_adjust=True, progress=False)
-        if df.empty: continue
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-        df.index = _strip_tz(df.index)
-        df = df[["Open","High","Low","Close","Volume"]].dropna()
-        raw_data[ticker] = df
-    except Exception:
-        pass
-print(f"다운로드 완료: {len(raw_data)}개")
+    print(f"티커 데이터 다운로드 ({len(tickers)}개)...")
+    raw_data: dict[str, pd.DataFrame] = {}
+    for ticker in tickers:
+        try:
+            df = yf.download(ticker, period="4y", auto_adjust=True, progress=False)
+            if df.empty: continue
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.get_level_values(0)
+            df.index = _strip_tz(df.index)
+            df = df[["Open","High","Low","Close","Volume"]].dropna()
+            raw_data[ticker] = df
+        except Exception:
+            pass
+    print(f"다운로드 완료: {len(raw_data)}개")
 
-print("지표 계산...")
-ind_data: dict[str, pd.DataFrame] = {}
-for ticker, df in raw_data.items():
-    try:
-        df_i = compute_indicators(df)
-        # Volume을 ind_data에도 포함 (진입 조건 체크용)
-        df_i["Volume"] = df["Volume"]
-        if len(df_i.dropna(subset=["ma200","adx"])) >= 20:
-            ind_data[ticker] = df_i
-    except Exception:
-        pass
-print(f"지표 계산 완료: {len(ind_data)}개")
+    print("지표 계산...")
+    ind_data: dict[str, pd.DataFrame] = {}
+    for ticker, df in raw_data.items():
+        try:
+            df_i = compute_indicators(df)
+            # Volume을 ind_data에도 포함 (진입 조건 체크용)
+            df_i["Volume"] = df["Volume"]
+            if len(df_i.dropna(subset=["ma200","adx"])) >= 20:
+                ind_data[ticker] = df_i
+        except Exception:
+            pass
+    print(f"지표 계산 완료: {len(ind_data)}개")
 
-all_days = _strip_tz(kospi_raw.index)
+    all_days = _strip_tz(kospi_raw.index)
 
 
-# ════════════════════════════════════════════════════════════════════════════
-# 그리드 서치
-# ════════════════════════════════════════════════════════════════════════════
-combos = list(itertools.product(ADX_LIST, TRAIL_LIST, VOL_LIST))
-print(f"\n그리드 서치: {len(combos)}개 조합...")
+    # ════════════════════════════════════════════════════════════════════════════
+    # 그리드 서치
+    # ════════════════════════════════════════════════════════════════════════════
+    combos = list(itertools.product(ADX_LIST, TRAIL_LIST, VOL_LIST))
+    print(f"\n그리드 서치: {len(combos)}개 조합...")
 
-results = []
-for i, (adx, trail, vol) in enumerate(combos, 1):
-    print(f"  [{i:2d}/{len(combos)}] ADX>={adx}  trail={trail}ATR  vol>{vol}x ...",
-          end=" ", flush=True)
-    r = run_backtest(ind_data, raw_data, kospi_ma200, kospi_close,
-                     all_days, adx, trail, vol)
-    r.update({"adx": adx, "trail": trail, "vol": vol})
-    results.append(r)
-    if r.get("n_trades", 0) > 0:
-        print(f"수익률={r['total_ret']:+.2f}%  샤프={r['sharpe']:.3f}  "
-              f"MDD={r['mdd']:.2f}%  거래={r['n_trades']}건")
+    results = []
+    for i, (adx, trail, vol) in enumerate(combos, 1):
+        print(f"  [{i:2d}/{len(combos)}] ADX>={adx}  trail={trail}ATR  vol>{vol}x ...",
+              end=" ", flush=True)
+        r = run_backtest(ind_data, raw_data, kospi_ma200, kospi_close,
+                         all_days, adx, trail, vol)
+        r.update({"adx": adx, "trail": trail, "vol": vol})
+        results.append(r)
+        if r.get("n_trades", 0) > 0:
+            print(f"수익률={r['total_ret']:+.2f}%  샤프={r['sharpe']:.3f}  "
+                  f"MDD={r['mdd']:.2f}%  거래={r['n_trades']}건")
+        else:
+            print("거래없음")
+
+
+    # ════════════════════════════════════════════════════════════════════════════
+    # 결과 출력
+    # ════════════════════════════════════════════════════════════════════════════
+    valid = [
+        r for r in results
+        if r.get("n_trades", 0) >= MIN_TRADES
+        and r.get("sharpe", -999) >= MIN_SHARPE
+        and r.get("mdd", -999) >= MAX_MDD
+        and r.get("pf", 0) >= MIN_PF
+    ]
+    valid.sort(key=lambda x: -x.get("sharpe", -999))
+
+    print(f"\n{'='*88}")
+    print(f"추세 추종 에이전트 그리드 서치  ({BT_START} ~ {BT_END})")
+    print(f"유효 조합: {len(valid)} / {len(results)}개"
+          f"  (샤프>={MIN_SHARPE}  MDD>={MAX_MDD}%  거래>={MIN_TRADES}건  손익비>={MIN_PF})")
+    print(f"{'='*88}")
+
+    if valid:
+        print(f"\n{'ADX':>4} {'trail':>6} {'vol':>5} {'수익률':>8} {'샤프':>7} {'MDD':>8} "
+              f"{'거래':>5} {'승률':>7} {'손익비':>7} {'평균보유':>8}")
+        print("-" * 88)
+        for r in valid:
+            print(f"{r['adx']:>4}  {r['trail']:>5.1f}x  {r['vol']:>4.1f}x"
+                  f"  {r['total_ret']:>7.2f}%  {r['sharpe']:>6.3f}  {r['mdd']:>7.2f}%"
+                  f"  {r['n_trades']:>5}  {r['win_rate']:>6.1f}%  {r['pf']:>6.2f}"
+                  f"  {r['avg_hold']:>6.1f}d")
+
+        # ── 상위 5개 상세 ─────────────────────────────────────────────────────
+        print(f"\n{'='*60}")
+        print("상위 5개 조합 상세")
+        print(f"{'='*60}")
+        for rank, r in enumerate(valid[:5], 1):
+            print(f"\n[{rank}위] ADX>={r['adx']}  trail={r['trail']}ATR  vol>{r['vol']}x")
+            print(f"  총 수익률   : {r['total_ret']:+.2f}%")
+            print(f"  샤프 비율   : {r['sharpe']:.3f}")
+            print(f"  MDD         : {r['mdd']:.2f}%")
+            print(f"  거래 수     : {r['n_trades']}건")
+            print(f"  승률        : {r['win_rate']:.1f}%")
+            print(f"  평균 수익   : {r['avg_win']:+.2f}%")
+            print(f"  평균 손실   : {r['avg_loss']:+.2f}%")
+            print(f"  손익비      : {r['pf']:.2f}")
+            print(f"  평균 보유   : {r['avg_hold']:.1f}일")
+            print(f"  청산 사유   : {r['exit_counts']}")
+
+        # ── 최적 조합 월별 수익률 ─────────────────────────────────────────────
+        best = valid[0]
+        monthly = best.get("monthly", {})
+        print(f"\n{'='*60}")
+        print(f"최적 조합 월별 수익률  (ADX>={best['adx']}  trail={best['trail']}ATR  vol>{best['vol']}x)")
+        print(f"{'='*60}")
+        years = sorted({k[:4] for k in monthly})
+        for year in years:
+            yr_months = {k: v for k, v in monthly.items() if k.startswith(year)}
+            cumulative = sum(yr_months.values())
+            month_str  = "  ".join(f"{k[5:]}월:{v:+.1f}%" for k, v in sorted(yr_months.items()))
+            print(f"  {year}: {month_str}  ← 합계 {cumulative:+.2f}%")
+
+        # ── reversion 비교 ───────────────────────────────────────────────────
+        print(f"\n{'='*72}")
+        print("에이전트 비교 (2023-01-01 ~ 2026-06-19 / reversion은 2026 기준)")
+        print(f"{'='*72}")
+        rv = REVERSION_BT
+        fmt = "  {:<22s}  {:>9}  {:>7}  {:>8}  {:>6}  {:>7}  {:>7}"
+        print(fmt.format("에이전트", "수익률", "샤프", "MDD", "거래", "승률", "손익비"))
+        print("  " + "-" * 68)
+        print(fmt.format(
+            "reversion (2026만)",
+            f"{rv['total_ret']:+.2f}%", f"{rv['sharpe']:.3f}",
+            f"{rv['mdd']:.2f}%", f"{rv['n_trades']}건",
+            f"{rv['win_rate']:.1f}%", f"{rv['pf']:.2f}",
+        ))
+        print(fmt.format(
+            f"trend (ADX{best['adx']}/T{best['trail']}/V{best['vol']})",
+            f"{best['total_ret']:+.2f}%", f"{best['sharpe']:.3f}",
+            f"{best['mdd']:.2f}%", f"{best['n_trades']}건",
+            f"{best['win_rate']:.1f}%", f"{best['pf']:.2f}",
+        ))
+
+        # ── 월별 수익률 상관계수 (2026 공통 구간) ────────────────────────────
+        rv_monthly = rv["monthly"]
+        trend_monthly = {k: v for k, v in monthly.items() if k in rv_monthly}
+        if len(trend_monthly) >= 3:
+            keys = sorted(trend_monthly)
+            t_vals = [trend_monthly[k] for k in keys]
+            r_vals = [rv_monthly[k] for k in keys]
+            corr   = float(np.corrcoef(t_vals, r_vals)[0, 1])
+            print(f"\n  월별 수익률 상관계수 (2026 공통 {len(keys)}개월): {corr:.3f}")
+            if   corr <  0:   interp = "역상관 — 분산 효과 우수"
+            elif corr < 0.3:  interp = "약한 양의 상관 — 분산 효과 양호"
+            elif corr < 0.6:  interp = "중간 상관 — 분산 효과 보통"
+            else:             interp = "강한 양의 상관 — 분산 효과 제한적"
+            print(f"  → {interp}")
+            print(f"\n  {'월':>8}  {'trend':>8}  {'reversion':>10}")
+            for k in keys:
+                print(f"  {k:>8}  {trend_monthly[k]:>+7.2f}%  {rv_monthly[k]:>+9.2f}%")
+        else:
+            print("\n  (공통 구간 부족 — 상관계수 계산 불가)")
+
     else:
-        print("거래없음")
-
-
-# ════════════════════════════════════════════════════════════════════════════
-# 결과 출력
-# ════════════════════════════════════════════════════════════════════════════
-valid = [
-    r for r in results
-    if r.get("n_trades", 0) >= MIN_TRADES
-    and r.get("sharpe", -999) >= MIN_SHARPE
-    and r.get("mdd", -999) >= MAX_MDD
-    and r.get("pf", 0) >= MIN_PF
-]
-valid.sort(key=lambda x: -x.get("sharpe", -999))
-
-print(f"\n{'='*88}")
-print(f"추세 추종 에이전트 그리드 서치  ({BT_START} ~ {BT_END})")
-print(f"유효 조합: {len(valid)} / {len(results)}개"
-      f"  (샤프>={MIN_SHARPE}  MDD>={MAX_MDD}%  거래>={MIN_TRADES}건  손익비>={MIN_PF})")
-print(f"{'='*88}")
-
-if valid:
-    print(f"\n{'ADX':>4} {'trail':>6} {'vol':>5} {'수익률':>8} {'샤프':>7} {'MDD':>8} "
-          f"{'거래':>5} {'승률':>7} {'손익비':>7} {'평균보유':>8}")
-    print("-" * 88)
-    for r in valid:
-        print(f"{r['adx']:>4}  {r['trail']:>5.1f}x  {r['vol']:>4.1f}x"
-              f"  {r['total_ret']:>7.2f}%  {r['sharpe']:>6.3f}  {r['mdd']:>7.2f}%"
-              f"  {r['n_trades']:>5}  {r['win_rate']:>6.1f}%  {r['pf']:>6.2f}"
-              f"  {r['avg_hold']:>6.1f}d")
-
-    # ── 상위 5개 상세 ─────────────────────────────────────────────────────
-    print(f"\n{'='*60}")
-    print("상위 5개 조합 상세")
-    print(f"{'='*60}")
-    for rank, r in enumerate(valid[:5], 1):
-        print(f"\n[{rank}위] ADX>={r['adx']}  trail={r['trail']}ATR  vol>{r['vol']}x")
-        print(f"  총 수익률   : {r['total_ret']:+.2f}%")
-        print(f"  샤프 비율   : {r['sharpe']:.3f}")
-        print(f"  MDD         : {r['mdd']:.2f}%")
-        print(f"  거래 수     : {r['n_trades']}건")
-        print(f"  승률        : {r['win_rate']:.1f}%")
-        print(f"  평균 수익   : {r['avg_win']:+.2f}%")
-        print(f"  평균 손실   : {r['avg_loss']:+.2f}%")
-        print(f"  손익비      : {r['pf']:.2f}")
-        print(f"  평균 보유   : {r['avg_hold']:.1f}일")
-        print(f"  청산 사유   : {r['exit_counts']}")
-
-    # ── 최적 조합 월별 수익률 ─────────────────────────────────────────────
-    best = valid[0]
-    monthly = best.get("monthly", {})
-    print(f"\n{'='*60}")
-    print(f"최적 조합 월별 수익률  (ADX>={best['adx']}  trail={best['trail']}ATR  vol>{best['vol']}x)")
-    print(f"{'='*60}")
-    years = sorted({k[:4] for k in monthly})
-    for year in years:
-        yr_months = {k: v for k, v in monthly.items() if k.startswith(year)}
-        cumulative = sum(yr_months.values())
-        month_str  = "  ".join(f"{k[5:]}월:{v:+.1f}%" for k, v in sorted(yr_months.items()))
-        print(f"  {year}: {month_str}  ← 합계 {cumulative:+.2f}%")
-
-    # ── reversion 비교 ───────────────────────────────────────────────────
-    print(f"\n{'='*72}")
-    print("에이전트 비교 (2023-01-01 ~ 2026-06-19 / reversion은 2026 기준)")
-    print(f"{'='*72}")
-    rv = REVERSION_BT
-    fmt = "  {:<22s}  {:>9}  {:>7}  {:>8}  {:>6}  {:>7}  {:>7}"
-    print(fmt.format("에이전트", "수익률", "샤프", "MDD", "거래", "승률", "손익비"))
-    print("  " + "-" * 68)
-    print(fmt.format(
-        "reversion (2026만)",
-        f"{rv['total_ret']:+.2f}%", f"{rv['sharpe']:.3f}",
-        f"{rv['mdd']:.2f}%", f"{rv['n_trades']}건",
-        f"{rv['win_rate']:.1f}%", f"{rv['pf']:.2f}",
-    ))
-    print(fmt.format(
-        f"trend (ADX{best['adx']}/T{best['trail']}/V{best['vol']})",
-        f"{best['total_ret']:+.2f}%", f"{best['sharpe']:.3f}",
-        f"{best['mdd']:.2f}%", f"{best['n_trades']}건",
-        f"{best['win_rate']:.1f}%", f"{best['pf']:.2f}",
-    ))
-
-    # ── 월별 수익률 상관계수 (2026 공통 구간) ────────────────────────────
-    rv_monthly = rv["monthly"]
-    trend_monthly = {k: v for k, v in monthly.items() if k in rv_monthly}
-    if len(trend_monthly) >= 3:
-        keys = sorted(trend_monthly)
-        t_vals = [trend_monthly[k] for k in keys]
-        r_vals = [rv_monthly[k] for k in keys]
-        corr   = float(np.corrcoef(t_vals, r_vals)[0, 1])
-        print(f"\n  월별 수익률 상관계수 (2026 공통 {len(keys)}개월): {corr:.3f}")
-        if   corr <  0:   interp = "역상관 — 분산 효과 우수"
-        elif corr < 0.3:  interp = "약한 양의 상관 — 분산 효과 양호"
-        elif corr < 0.6:  interp = "중간 상관 — 분산 효과 보통"
-        else:             interp = "강한 양의 상관 — 분산 효과 제한적"
-        print(f"  → {interp}")
-        print(f"\n  {'월':>8}  {'trend':>8}  {'reversion':>10}")
-        for k in keys:
-            print(f"  {k:>8}  {trend_monthly[k]:>+7.2f}%  {rv_monthly[k]:>+9.2f}%")
-    else:
-        print("\n  (공통 구간 부족 — 상관계수 계산 불가)")
-
-else:
-    print("\n유효 조합 없음. 전체 결과 상위 5개 (필터 없음):")
-    all_valid = sorted(
-        [r for r in results if r.get("n_trades", 0) > 0],
-        key=lambda x: -x.get("sharpe", -999)
-    )
-    for r in all_valid[:5]:
-        print(f"  ADX>={r['adx']}  trail={r['trail']}ATR  vol>{r['vol']}x  "
-              f"수익률={r['total_ret']:+.2f}%  샤프={r['sharpe']:.3f}  "
-              f"MDD={r['mdd']:.2f}%  거래={r['n_trades']}건")
+        print("\n유효 조합 없음. 전체 결과 상위 5개 (필터 없음):")
+        all_valid = sorted(
+            [r for r in results if r.get("n_trades", 0) > 0],
+            key=lambda x: -x.get("sharpe", -999)
+        )
+        for r in all_valid[:5]:
+            print(f"  ADX>={r['adx']}  trail={r['trail']}ATR  vol>{r['vol']}x  "
+                  f"수익률={r['total_ret']:+.2f}%  샤프={r['sharpe']:.3f}  "
+                  f"MDD={r['mdd']:.2f}%  거래={r['n_trades']}건")
