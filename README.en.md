@@ -83,36 +83,65 @@ Paper test period: started 2026-06-19 (2-week target)
 
 ## Backtest Results
 
-### Slot Configuration Comparison (2024-01-01 ~ 2026-06-19)
+> Final strategy: **D — Expanding Window + PIT 200 Universe**
 
-| Config | Return | Sharpe | MDD | Trades |
-|--------|--------|--------|-----|--------|
-| Shared 10 slots (old) | +84.67% | 1.210 | -25.69% | 1,284 |
-| Separated 5+5 | +130.33% | 1.933 | -15.62% | 493 |
-| **Separated 10+10 (adopted)** | **+159.31%** | **1.847** | **-20.01%** | **970** |
+### Final Performance (2023~2026, Walk-Forward 4-Fold)
 
-### Per-Agent Performance (2024~2026.6)
+| Metric | Result |
+|--------|--------|
+| Total Return | **+78.52%** |
+| Sharpe | **1.037** |
+| MDD | -15.84% |
+| Trades | 1,545 (reversion 883 / trend 662) |
+| Win Rate | 43.3% |
+| P/L Ratio | 1.74 |
 
-| Agent | Return | Sharpe | MDD | Trades | Win Rate |
-|-------|--------|--------|-----|--------|----------|
-| Reversion (ML) | +29.09% | 0.745 | -18.54% | 469 | 48.8% |
-| Trend Following | +157.87% | 1.928 | -15.59% | 501 | 43.5% |
+### Annual Returns
 
-### Separated 10+10 Full Metrics
+| Year | Return |
+|------|--------|
+| 2023 | +13.62% |
+| 2024 | +0.92% |
+| 2025 | +28.26% |
+| 2026 | +18.38% |
 
-- Total return: +159.31% / Sharpe: 1.847 / MDD: -20.01% / Trades: 970 / Win rate: 46.1% / P/L ratio: 2.02
+### 4-Way Methodology Comparison
 
-### Annual Returns (Separated 10+10)
+| Method | Return | Sharpe | MDD |
+|--------|--------|--------|-----|
+| A) Expanding + Static 200 | +100.35% | 1.196 | -13.43% |
+| **D) Expanding + PIT 200 (adopted)** | **+78.52%** | **1.037** | -15.84% |
+| B) Rolling 3Y + Static 200 | +91.01% | 1.148 | -15.88% |
+| C) Rolling 3Y + PIT 200 | +72.70% | 1.024 | -15.08% |
 
-| Year | Combined | Reversion | Trend |
-|------|----------|-----------|-------|
-| 2024 | +17.24% | +13.15% | +15.35% |
-| 2025 | +47.18% | +1.93% | +45.09% |
-| 2026 | +47.68% | +10.10% | +52.87% |
+Survivorship bias correction (A→D): **-21.8%pt** / Training method effect (A→B): -9.3%pt
 
-Agent ratio: reversion 469 trades (48%) / trend 501 trades (52%)
-Monthly correlation (reversion vs trend): 0.309
-Cash ratio (separated 10+10): 2024 31.7%, 2025 48.0%, 2026 32.0%
+---
+
+## Backtest Reliability — Bias Discovery and Quantitative Correction
+
+The initial backtest showed a high +159% return. We systematically identified and quantitatively corrected the following biases:
+
+### Identified Biases and Corrections
+
+**1. Survivorship Bias (+21.8%pt overestimation)**
+- Initial: backtested 2024~2026 using the current (2026) top-200 by market cap — future information leak
+- Corrected: replaced with Point-in-Time (PIT) dynamic universe at each validation date → -21.8%pt correction
+
+**2. Validation Period Bias (2024~2026 → 2023~2026)**
+- Initial: validation started from 2024 only (insufficient sample, only bull-market years)
+- Corrected: extended validation back to 2023 with training data from 2020
+
+**3. Training Method Validation (Rolling vs Expanding)**
+- Empirically compared Rolling 3Y vs Expanding window via 4-way test
+- Result: Expanding adopted — Rolling discards older patterns, losing -9.3%pt in performance
+
+**4. Probability Calibration (Platt Scaling) Removed**
+- Mismatch discovered: backtest used rule-based triggers (no Platt Scaling) while live trading applied it
+- Unified to raw XGBoost probabilities for backtest-live consistency
+
+> The core credibility of this system lies not in the magnitude of returns, but in **the process of discovering biases and correcting them quantitatively**.
+> After correction, the realistic expectation is ~+20% annualized, Sharpe 1.04.
 
 ---
 
