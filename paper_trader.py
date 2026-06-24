@@ -379,7 +379,26 @@ def evaluate_positions_auto(trade_day: bool = False) -> list[dict]:
         logger.warning("[Paper] 현재가 조회 실패 — 평가 스킵")
         return []
 
-    closed = evaluate_positions(price_map, trade_day=trade_day)
+    # trend 포지션 MA20/ADX 계산용 OHLCV 조회
+    df_map: dict = {}
+    trend_tickers = {
+        pos["ticker"] for pos in positions.values()
+        if pos.get("agent") == "trend"
+    }
+    if trend_tickers:
+        from ml.features import add_features
+        for tkr in trend_tickers:
+            try:
+                raw_df = yf.download(tkr, period="3mo", interval="1d",
+                                     progress=False, auto_adjust=True)
+                if len(raw_df) >= 25:
+                    raw_df.columns = [c[0] if isinstance(c, tuple) else c
+                                      for c in raw_df.columns]
+                    df_map[tkr] = add_features(raw_df)
+            except Exception as e:
+                logger.debug("[Paper] trend df 조회 실패 %s: %s", tkr, e)
+
+    closed = evaluate_positions(price_map, trade_day=trade_day, df_map=df_map)
     if closed:
         try:
             from notifier import send_telegram
