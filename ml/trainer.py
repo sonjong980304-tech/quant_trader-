@@ -120,7 +120,7 @@ def retrain_daily(market: str = "all", period: str = "5y") -> dict:
 
     # ── 2단계: KR reversion 합산 단일 전역 모델 ──────────────────────
     if market in ("kr", "all") and kr_tickers:
-        logger.info("2단계: KR reversion 합산 데이터 구성 (%d개 종목)...", len(kr_tickers))
+        logger.info("2단계: KR reversion 합산 데이터 구성 (%d개 종목, 10y)...", len(kr_tickers))
         rev_dfs = []
         for ticker in kr_tickers:
             raw_df = data.get(ticker)

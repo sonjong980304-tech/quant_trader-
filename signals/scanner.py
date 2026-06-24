@@ -20,7 +20,7 @@ from config import ML_MIN_WIN_PROB as MIN_WIN_PROB, ML_MIN_RISK_REWARD as MIN_RI
 
 logger = logging.getLogger(__name__)
 MIN_TRIGGERS    = 1      # 기술적 트리거 최소 1개 이상
-MIN_MODEL_AUC   = 0.58   # 최소 모델 예측력 (0.5 = 동전던지기, 0.58+ = 참고 가능)
+MIN_MODEL_AUC   = 0.50   # 전역 합산 모델 기준 — win_prob(>=0.60) 필터가 품질 게이트 역할
 
 # 트리거 → 에이전트 매핑
 _MOMENTUM_TRIGGERS  = {"거래량폭발", "BB스퀴즈돌파"}
