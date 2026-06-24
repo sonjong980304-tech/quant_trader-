@@ -42,9 +42,15 @@ def fetch_10y(ticker: str) -> pd.DataFrame:
 
 
 def fetch_5y(ticker: str) -> pd.DataFrame:
-    """5년치 일봉 데이터 다운로드 (일일 재학습용)."""
+    """5년치 일봉 데이터 다운로드."""
     logger.info("데이터 다운로드: %s (5년)", ticker)
     return _fetch(ticker, "5y")
+
+
+def fetch_3y(ticker: str) -> pd.DataFrame:
+    """3년치 일봉 데이터 다운로드."""
+    logger.info("데이터 다운로드: %s (3년)", ticker)
+    return _fetch(ticker, "3y")
 
 
 def retrain_daily(market: str = "all", period: str = "5y") -> dict:
