@@ -47,7 +47,7 @@ PAPER_BACKTEST_EV_US = None  # US 미운용
 BACKTEST_EV    = PAPER_BACKTEST_EV    # KR 백테스트 참고 EV
 MAX_HOLD_DAYS  = EOD_HORIZON          # reversion 보유기간 10거래일
 ASSUMED_SLIP   = EOD_SLIPPAGE_PCT     # 가정 슬리피지 0.05%
-# trend 에이전트: TP 없음, trailing stop 2.0×ATR + MA20 이탈 청산 (evaluate_positions에서 별도 처리)
+# trend 에이전트: trailing 2×ATR → MA20 이탈 → ADX<20 → 60일 만기 (combined_v2 일치)
 
 # ─── P3 Circuit Breaker 임계값 ────────────────────────────────────────────────
 CB_EV_30     = -0.005    # n≥30: EV ≤ -0.5%
