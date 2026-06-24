@@ -169,7 +169,7 @@ def retrain_daily(market: str = "all", period: str = "5y") -> dict:
             combined_rev = pd.concat(rev_dfs).sort_values("_date").reset_index(drop=True)
             logger.info("  reversion 합산: %d행 / %d개 종목", len(combined_rev), len(rev_dfs))
             try:
-                _, global_metrics = train_global(combined_rev, agent="reversion")
+                _, global_metrics = train_global(combined_rev, agent="reversion", wf_folds=wf_folds_kr)
                 results["_global_reversion"] = global_metrics
                 logger.info("  KR reversion 전역 모델 완료 auc=%.4f acc=%.3f",
                             global_metrics["auc"], global_metrics["accuracy"])
