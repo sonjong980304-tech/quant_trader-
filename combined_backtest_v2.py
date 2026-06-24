@@ -706,7 +706,7 @@ metrics = [
 ]
 hdr = f"  {'항목':>10}" + "".join(f"  {lbl:>{W}}" for lbl, _ in configs)
 print(hdr)
-print("  " + "-" * (12 + (W+2)*3))
+print("  " + "-" * (12 + (W+2)*4))
 for label, key, fmt_fn in metrics:
     row = f"  {label:>10}"
     for _, r in configs:
