@@ -24,10 +24,10 @@ LIVE_TRADING = False  (페이퍼 트레이딩 중)
 
 ### 에이전트 1 — Mean Reversion (ML 기반)
 
-- XGBoost + Platt Scaling (CalibratedClassifierCV)
+- XGBoost (Raw 확률, 보정 없음)
 - 트리플 배리어 레이블링: TP=+15%, SL=-8%, hold=10일
-- Walk-Forward Expanding Window (3-Fold WF)
-- OOF AUC: 0.5270 (전체 OOF) / 0.6591 (valid 2026) (8 피처)
+- Walk-Forward Expanding Window (4-Fold WF, 2023~2026)
+- 유니버스: 시점별 동적 PIT 시총 상위 200 (생존편향 제거)
 - 피처: atr_pct, kospi_relative_20d, beta_60d, ma200_deviation, ret_60d, ret_20d, high52_pct, kospi_relative_5d
 
 ### 에이전트 2 — Trend Following (규칙 기반)
