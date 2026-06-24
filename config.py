@@ -121,7 +121,7 @@ LOG_FILE = "logs/trader.log"
 # 페이퍼 트레이딩 기준값 (슬롯 분리 10+10, 2026-06-19 채택)
 # ─────────────────────────────────────────────
 # 합산 백테스트: reversion 10슬롯 + trend 10슬롯 분리 운용
-PAPER_BACKTEST_EV_KR = 0.01301   # 백테스트 참고 EV (TP=15%/SL=8%, WF OOF 5556건)
+PAPER_BACKTEST_EV_KR = None       # 구시대 WF OOF 기준값 — 현재 전략과 무관하여 비활성화
 PAPER_BACKTEST_EV_US = None      # US 미운용
 
 # reversion 에이전트 전용 파라미터
