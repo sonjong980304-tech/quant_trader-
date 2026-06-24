@@ -339,7 +339,7 @@ def train_global(combined_df: pd.DataFrame, agent: str,
     avg_win  = float(wins.mean())        if len(wins)   > 0 else 0.0
     avg_loss = float(abs(losses.mean())) if len(losses) > 0 else 0.0
 
-    fi_pairs = sorted(zip(feature_cols, final_model.feature_importances_),
+    fi_pairs = sorted(zip(feature_cols, calibrated_model.feature_importances_),
                       key=lambda x: x[1], reverse=True)
 
     _op = oof_proba[valid_mask]
