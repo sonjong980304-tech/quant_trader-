@@ -890,7 +890,7 @@ def retrain_kr_models(_is_retry: bool = False):
     logger.info("KR ML 재학습 %s", label)
     try:
         from ml.trainer import retrain_daily
-        results = retrain_daily(market="kr")
+        results = retrain_daily(market="kr", period="10y")
         ok   = sum(1 for v in results.values() if v)
         fail = len(results) - ok
 
