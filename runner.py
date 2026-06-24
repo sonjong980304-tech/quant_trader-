@@ -858,11 +858,16 @@ def _needs_retry(results: dict) -> bool:
 
 
 def retrain_kr_models(_is_retry: bool = False):
-    """매일 07:30 실행 — KRX 유니버스 ML 모델 재학습. 절반 이상 실패 시 30분마다 재시도."""
+    """분기별 재학습 (1/4/7/10월 1일 또는 직후 첫 영업일). 절반 이상 실패 시 30분마다 재시도."""
     global _retrain_retry_kr
     now = datetime.now(KST)
-    if not _is_retry and not is_kr_trading_day(now.date()):
-        return
+    today = now.date()
+    if not _is_retry:
+        if not is_kr_trading_day(today):
+            return
+        if not is_retrain_day(today):
+            return  # 재학습일 아님 — 추론(EOD 스캔)만 계속
+        logger.info("분기별 재학습일 확인: %s — 재학습 시작", today)
     label = "재시도" if _is_retry else "시작"
     logger.info("KR ML 재학습 %s", label)
     try:
