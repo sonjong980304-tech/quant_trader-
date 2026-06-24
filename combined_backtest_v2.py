@@ -718,7 +718,7 @@ for label, key, fmt_fn in metrics:
 print(f"\n[에이전트별 거래 수]")
 hdr = f"  {'에이전트':>10}" + "".join(f"  {lbl:>{W}}" for lbl, _ in configs)
 print(hdr)
-print("  " + "-" * (12 + (W+2)*3))
+print("  " + "-" * (12 + (W+2)*4))
 for ag in ["reversion", "trend"]:
     row = f"  {ag:>10}"
     for _, r in configs:
