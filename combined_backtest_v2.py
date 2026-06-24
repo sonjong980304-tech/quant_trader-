@@ -48,8 +48,19 @@ BT_START = "2023-01-01"
 BT_END   = "2026-06-20"
 
 REV_TP, REV_SL, REV_HOLD = 0.15, 0.08, 10
-REV_WP  = ML_MIN_WIN_PROB   # config 단일 진실 소스 — 라이브 _eval_agent와 동일 임계값
+REV_WP  = ML_MIN_WIN_PROB      # config 단일 진실 소스 — 라이브 _eval_agent와 동일 임계값
+REV_RR  = ML_MIN_RISK_REWARD   # 손익비 게이트 — 라이브 _eval_agent와 동일
 REV_PF  = REV_TP / REV_SL
+
+# 손익비 계산용 모델 메트릭 (라이브 _eval_agent와 동일한 avg_win/avg_loss 사용)
+def _load_rev_metrics():
+    try:
+        from ml.model import load_model
+        _, m = load_model("_global", "reversion")
+        return m.get("avg_win", 0.099), m.get("avg_loss", 0.065)
+    except Exception:
+        return 0.099, 0.065
+_REV_AVG_WIN, _REV_AVG_LOSS = _load_rev_metrics()
 
 TR_ADX, TR_TRAIL, TR_VOL = 25, 2.0, 1.3
 TR_HOLD  = 60
