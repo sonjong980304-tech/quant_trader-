@@ -239,7 +239,7 @@ Final qty       = min(Half-Kelly qty, Risk Parity qty)
 
 | Time | Action |
 |------|--------|
-| 07:30 (trading days) | XGBoost parallel retraining on universe filtered by change rate > 0% + top 100 by trading value |
+| 07:30 (1st of Jan/Apr/Jul/Oct or next trading day) | **Quarterly ML retraining** — Expanding Window + PIT top-200 by market cap (reversion XGBoost only; trend is rule-based) |
 | 08:00 (trading days) | Morning briefing — AI market overview + news |
 | 09:00 (trading days) | KR pending order execution — next-day open buy based on EOD signal |
 | **09:05 (trading days)** | **KR paper open price confirmation** — `update_entry_prices("KR")` |
