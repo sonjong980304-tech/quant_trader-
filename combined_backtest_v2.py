@@ -670,15 +670,16 @@ print(f"  → {r_C.get('total_ret', 0):+.2f}%  거래={r_C.get('n_trades', 0)}�
 YEARS = ["2023", "2024", "2025", "2026"]
 configs = [
     ("A) Expanding+정적200",  r_A),
+    ("D) Expanding+PIT200",   r_D),
     ("B) Rolling+정적200",    r_B),
     ("C) Rolling+PIT200",     r_C),
 ]
-W = 22
+W = 20
 
-print(f"\n{'='*75}")
-print(f"  3-way 비교: Expanding vs Rolling × 정적 vs PIT")
+print(f"\n{'='*87}")
+print(f"  4-way 비교: Expanding vs Rolling × 정적 vs PIT")
 print(f"  검증 구간: {BT_START} ~ {BT_END}")
-print(f"{'='*75}")
+print(f"{'='*87}")
 
 # 연도별 수익률
 print(f"\n[연도별 수익률]")
