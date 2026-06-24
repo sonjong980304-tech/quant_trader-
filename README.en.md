@@ -72,8 +72,8 @@ Paper test period: started 2026-06-19 (2-week target)
 | Item | Paper (arXiv:2601.19504) | This System |
 |------|--------------------------|-------------|
 | Labeling | Next-day direction (simple) | Triple-Barrier (precise) |
-| Validation | Simple 7:3 split | Walk-Forward (strict time-series) |
-| Probability calibration | None | Platt Scaling |
+| Validation | Simple 7:3 split | Walk-Forward + PIT universe (strict time-series) |
+| Probability calibration | None | None (raw XGBoost — consistent with backtest) |
 | Evaluation metric | Accuracy 63% | AUC (robust to class imbalance) |
 | Order type | Market order | Next-day open limit order |
 | Target market | S&P 500 | KRX Korean stocks |
