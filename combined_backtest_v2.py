@@ -482,8 +482,8 @@ def run_sim(bt_days, sigs, rev_slots=10, tr_slots=10):
 
             rsn = None
             if pos["agent"] == "reversion":
-                if   hi >= ep * (1 + REV_TP):     rsn = "TP"
-                elif lo <= ep * (1 - REV_SL):     rsn = "SL"
+                if   lo <= ep * (1 - REV_SL):     rsn = "SL"   # SL 우선 — _triple_barrier_pnl 라벨·walkforward·paper와 동일
+                elif hi >= ep * (1 + REV_TP):     rsn = "TP"
                 elif pos["hold_days"] >= REV_HOLD: rsn = "TIME"
             else:
                 atr_e    = pos.get("atr_at_entry", 0)
