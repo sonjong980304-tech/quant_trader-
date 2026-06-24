@@ -936,36 +936,47 @@ def retrain_kr_models(_is_retry: bool = False):
                 _retrain_retry_kr.cancel()
                 _retrain_retry_kr = None
 
-            global_m = results.get("_global_reversion") or {}
-            new_auc  = global_m.get("auc", 0.0)
-            avg_acc  = global_m.get("accuracy", 0.0)
-            avg_win  = global_m.get("avg_win", 0.0)
+            global_m    = results.get("_global_reversion") or {}
+            new_auc     = global_m.get("auc",      0.0)
+            avg_acc     = global_m.get("accuracy", 0.0)
+            new_avg_win = global_m.get("avg_win",  0.0)
             AUC_THRESHOLD = 0.55
 
-            if new_auc < AUC_THRESHOLD:
-                # AUC 미달 → 기존 모델 복원
+            auc_ok     = new_auc     >  AUC_THRESHOLD
+            avg_win_ok = new_avg_win >  old_avg_win
+
+            if not auc_ok or not avg_win_ok:
+                # 기준 미달 → 기존 모델 복원
                 if _os.path.exists(backup_path):
                     shutil.copy2(backup_path, model_path)
-                logger.warning("새 모델 AUC %.4f < %.2f — 기존 모델 유지", new_auc, AUC_THRESHOLD)
+                reasons = []
+                if not auc_ok:
+                    reasons.append(f"AUC {new_auc:.4f} < {AUC_THRESHOLD}")
+                if not avg_win_ok:
+                    reasons.append(
+                        f"avg_win {new_avg_win*100:.1f}% ≤ 기존 {old_avg_win*100:.1f}%"
+                    )
+                logger.warning("새 모델 미달(%s) — 기존 모델 유지", " / ".join(reasons))
                 send_telegram(
-                    f"⚠️ <b>KR ML 재학습 AUC 미달 — 기존 모델 유지</b>\n"
+                    f"⚠️ <b>KR ML 재학습 기준 미달 — 기존 모델 유지</b>\n"
                     f"━━━━━━━━━━━━━━━━━━━━\n"
                     f"📅 {now.strftime('%Y-%m-%d %H:%M')}\n"
-                    f"📉 새 모델 AUC: {new_auc:.4f} (기준 {AUC_THRESHOLD})\n"
+                    f"📉 {chr(10).join(reasons)}\n"
                     f"✅ 기존 모델 계속 사용합니다.\n"
                     f"🗓 다음 재학습 시도: {nxt}"
                 )
             else:
-                # AUC 통과 → 새 모델 사용
-                logger.info("새 모델 AUC %.4f >= %.2f — 채택", new_auc, AUC_THRESHOLD)
+                # 두 조건 모두 통과 → 새 모델 채택
+                logger.info("새 모델 채택: AUC %.4f, avg_win %.1f%%",
+                            new_auc, new_avg_win * 100)
                 send_telegram(
-                    f"🤖 <b>KR ML 분기별 재학습 완료</b>\n"
+                    f"🤖 <b>KR ML 분기별 재학습 완료 — 새 모델 채택</b>\n"
                     f"━━━━━━━━━━━━━━━━━━━━\n"
                     f"📅 완료: {now.strftime('%Y-%m-%d %H:%M')}\n"
                     f"📊 유니버스: 시총 상위 200개 (3년치)\n"
-                    f"📈 AUC: {new_auc:.4f}\n"
+                    f"📈 AUC: {new_auc:.4f} (기존 {old_auc:.4f})\n"
                     f"🎯 정확도(승률): {avg_acc*100:.1f}%\n"
-                    f"💰 평균 수익률(성공): {avg_win*100:.1f}%\n"
+                    f"💰 avg_win: {new_avg_win*100:.1f}% (기존 {old_avg_win*100:.1f}%)\n"
                     f"━━━━━━━━━━━━━━━━━━━━\n"
                     f"🗓 다음 재학습: {nxt}"
                 )
