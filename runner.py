@@ -848,6 +848,24 @@ def is_retrain_day(today: date) -> bool:
     return False
 
 
+def next_retrain_date(from_date: date | None = None) -> str:
+    """다음 분기 재학습 예정일 (MM-DD 기준 가장 가까운 미래 날짜) 반환."""
+    from config import RETRAIN_SCHEDULE
+    today = from_date or datetime.now(KST).date()
+    candidates = []
+    for year_offset in (0, 1):
+        for s in RETRAIN_SCHEDULE:
+            m, d = int(s.split('-')[0]), int(s.split('-')[1])
+            try:
+                c = date(today.year + year_offset, m, d)
+            except ValueError:
+                continue
+            if c > today:
+                candidates.append(c)
+    candidates.sort()
+    return candidates[0].strftime('%Y-%m-%d') if candidates else '알 수 없음'
+
+
 def _needs_retry(results: dict) -> bool:
     """전체 종목 중 절반 이상 실패(또는 0개)면 True."""
     total = len(results)
