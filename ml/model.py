@@ -297,6 +297,7 @@ def train_global(combined_df: pd.DataFrame, agent: str,
         fold_aucs.append((fold_label, round(fold_auc, 4)))
         logger.info("[global/%s] train=%d val=%d acc=%.3f auc=%.4f",
                     agent, len(tr_idx), len(vl_idx), fold_acc, fold_auc)
+        last_fold_model = fold_model  # 마지막 fold 모델 보존 (OOS 검증 완료)
 
     # OOF 메트릭 (validation에 포함된 행만)
     valid_mask = ~np.isnan(oof_proba)
