@@ -257,8 +257,9 @@ def train_global(combined_df: pd.DataFrame, agent: str,
     future_ret = combined_df["_future_return"].values
     dates      = pd.to_datetime(combined_df["_date"]).dt.tz_localize(None)
 
-    oof_proba  = np.full(len(X), np.nan)
-    fold_aucs  = []
+    oof_proba       = np.full(len(X), np.nan)
+    fold_aucs       = []
+    last_fold_model = None
 
     for train_start, train_end, val_end in wf_folds:
         val_start = train_end
