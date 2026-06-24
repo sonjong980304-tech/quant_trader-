@@ -232,10 +232,12 @@ def log_paper_signal(
 # 매 거래일 장 종료 후 호출. Triple-Barrier와 동일한 청산 로직.
 # ─────────────────────────────────────────────────────────────────────────────
 
-def evaluate_positions(price_map: dict[str, float], trade_day: bool = True) -> list[dict]:
+def evaluate_positions(price_map: dict[str, float], trade_day: bool = True,
+                       df_map: dict = None) -> list[dict]:
     """
     price_map: {ticker: 현재가}
     trade_day: 거래일 1일 경과로 카운트할지 여부 (기본 True)
+    df_map:    {ticker: DataFrame} — trend MA20/ADX 청산에 필요 (없으면 trailing만 사용)
     반환: 청산된 거래 목록
     """
     positions = _load(POS_PATH, {})
