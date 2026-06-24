@@ -848,7 +848,7 @@ def is_retrain_day(today: date) -> bool:
     return False
 
 
-def next_retrain_date(from_date: date | None = None) -> str:
+def next_retrain_date(from_date=None) -> str:
     """다음 분기 재학습 예정일 (MM-DD 기준 가장 가까운 미래 날짜) 반환."""
     from config import RETRAIN_SCHEDULE
     today = from_date or datetime.now(KST).date()
