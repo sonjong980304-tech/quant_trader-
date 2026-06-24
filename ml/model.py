@@ -382,8 +382,8 @@ def train_global(combined_df: pd.DataFrame, agent: str,
 
     brier_log = (f" brier={brier_raw:.4f}→{brier_cal:.4f}"
                  if not np.isnan(brier_raw) else "")
-    logger.info("[global/%s] 저장 완료 n=%d pos=%.3f acc=%.3f auc=%.4f%s",
-                agent, len(X), y.mean(), acc, auc, brier_log)
+    logger.info("[global/%s] 저장 완료 n=%d pos=%.3f acc=%.3f auc=%.4f(oof=%.4f)%s",
+                agent, len(X), y.mean(), acc, last_fold_auc, auc, brier_log)
     return calibrated_model, metrics
 
 
