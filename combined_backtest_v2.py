@@ -48,7 +48,7 @@ BT_START = "2023-01-01"
 BT_END   = "2026-06-20"
 
 REV_TP, REV_SL, REV_HOLD = 0.15, 0.08, 10
-REV_WP  = 0.52
+REV_WP  = ML_MIN_WIN_PROB   # config 단일 진실 소스 — 라이브 _eval_agent와 동일 임계값
 REV_PF  = REV_TP / REV_SL
 
 TR_ADX, TR_TRAIL, TR_VOL = 25, 2.0, 1.3
