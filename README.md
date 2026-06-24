@@ -381,7 +381,7 @@ P4 실거래 게이트 기준
        │    │   MemorySaver checkpointer — thread_id 유저별 대화 분리  │
        │    └───────────────────────────────────────────────────────┘
        │
-       ├── [07:30] ml/trainer.py — 등락률 > 0% + 거래대금 상위 100개 유니버스 XGBoost 병렬 재학습
+       ├── [07:30, 분기별] ml/trainer.py — Expanding Window + PIT 시총 상위 200 XGBoost 재학습 (1/4/7/10월 1일)
        │
        ├── [08:00] morning_briefer.py — 보유종목 뉴스 + 시황
        │
