@@ -144,11 +144,12 @@ def _build_signal_graph():
     g.add_node("select_best",     _node_select_best)
 
     g.set_entry_point("trigger_detect")
+    # momentum은 규칙 기반 trend(runner.py)에 위임 — ML 에이전트 불사용
     g.add_conditional_edges("trigger_detect", _route_trigger, {
         "no_trigger":     END,
-        "momentum_only":  "momentum_only",
+        "momentum_only":  END,
         "reversion_only": "reversion_only",
-        "both":           "both_agents",
+        "both":           "reversion_only",
     })
     g.add_edge("momentum_only",  "select_best")
     g.add_edge("reversion_only", "select_best")
