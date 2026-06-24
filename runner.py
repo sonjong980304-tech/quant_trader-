@@ -826,6 +826,28 @@ _retrain_retry_us = None  # threading.Timer
 _RETRAIN_RETRY_INTERVAL = 1800  # 30분
 
 
+def is_retrain_day(today: date) -> bool:
+    """오늘이 분기별 재학습일(1/4/7/10월 1일 또는 직후 첫 영업일)인지 판정."""
+    from config import RETRAIN_SCHEDULE
+    mmdd = today.strftime('%m-%d')
+    if mmdd in RETRAIN_SCHEDULE:
+        return True
+    # 재학습일이 휴일/주말이었으면 직후 첫 영업일에 실행 (최대 7일 내)
+    for s in RETRAIN_SCHEDULE:
+        m, d = int(s.split('-')[0]), int(s.split('-')[1])
+        try:
+            sched_date = date(today.year, m, d)
+        except ValueError:
+            continue
+        gap = (today - sched_date).days
+        if 1 <= gap <= 7:
+            # sched_date ~ today 사이(exclusive today)에 영업일이 없어야 함
+            interim = [sched_date + timedelta(days=i) for i in range(1, gap)]
+            if not any(is_kr_trading_day(d_) for d_ in interim):
+                return True
+    return False
+
+
 def _needs_retry(results: dict) -> bool:
     """전체 종목 중 절반 이상 실패(또는 0개)면 True."""
     total = len(results)
