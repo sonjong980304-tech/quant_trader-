@@ -901,9 +901,11 @@ def retrain_kr_models(_is_retry: bool = False):
         if _os.path.exists(model_path):
             shutil.copy2(model_path, backup_path)
             try:
-                _old = _pkl.load(open(backup_path, "rb"))
-                old_auc     = _old["metrics"].get("auc",     0.0)
-                old_avg_win = _old["metrics"].get("avg_win", 0.0)
+                _old        = _pkl.load(open(backup_path, "rb"))
+                _old_m      = _old["metrics"]
+                _old_folds  = _old_m.get("fold_aucs", [])
+                old_auc     = float(_old_folds[-1][1]) if _old_folds else _old_m.get("auc", 0.0)
+                old_avg_win = _old_m.get("avg_win", 0.0)
             except Exception:
                 pass
             logger.info("기존 모델 백업 완료: AUC=%.4f avg_win=%.1f%%",
