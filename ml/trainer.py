@@ -49,24 +49,25 @@ def fetch_5y(ticker: str) -> pd.DataFrame:
 
 def retrain_daily(market: str = "all", period: str = "5y") -> dict:
     """
-    유니버스 종목 병렬 재학습.
-    market: 'kr' (KRX만) | 'us' (US만) | 'all' (둘 다)
-    period: '5y' | '10y'
-    반환: {ticker: metrics or None}
+    KR reversion: 전체 종목 합산 단일 전역 모델 (train_global) — 백테스트와 동일한 구조.
+    trend: 규칙 기반 운용 (ML 학습 없음).
+    US: 기존 종목별 train() 방식 유지.
+    반환: {"_global_reversion": metrics, ...US tickers...}
     """
-    from concurrent.futures import ThreadPoolExecutor
-    from ml.model import train
+    from ml.model import train, train_global
+    from ml.features import add_features, _triple_barrier_pnl, FEATURE_COLS, detect_reversion_rows
+    from config import TP_PCT, SL_PCT, EOD_HORIZON as HORIZON
 
     tickers_dict: dict = {}
+    kr_tickers: list = []
 
-    # 재학습은 과거 5년치 일봉 기반 → 실시간 스크리닝 불필요
-    # 시가총액 기준 정적 유니버스 사용 (장외 시간에도 안정적으로 동작)
     if market in ("kr", "all"):
         try:
             from signals.krx_universe import get_krx_backtest_universe
             kr = get_krx_backtest_universe(top_n=200)
             if kr:
                 tickers_dict.update(kr)
+                kr_tickers = [t for t in kr if t.endswith(".KS") or t.endswith(".KQ")]
                 logger.info("KRX 유니버스: %d개", len(kr))
             else:
                 raise ValueError("KRX 유니버스 0개")
@@ -74,6 +75,7 @@ def retrain_daily(market: str = "all", period: str = "5y") -> dict:
             logger.warning("KRX 유니버스 조회 실패(%s) → config.STOCKS fallback", e)
             from config import STOCKS
             tickers_dict.update(STOCKS)
+            kr_tickers = list(STOCKS.keys())
             logger.info("KRX fallback: config.STOCKS %d개", len(STOCKS))
 
     if market in ("us", "all"):
@@ -96,8 +98,6 @@ def retrain_daily(market: str = "all", period: str = "5y") -> dict:
     logger.info("재학습 시작: %d개 종목 (market=%s)", len(tickers), market)
 
     # ── 1단계: 데이터 다운로드 (직렬) ──────────────────────────────
-    # yfinance는 멀티스레드 환경에서 데이터가 섞이는 버그가 있으므로
-    # 다운로드는 반드시 순서대로 처리
     fetch_fn = fetch_10y if period == "10y" else fetch_5y
     logger.info("1단계: 데이터 다운로드 (직렬, %s)", period)
     data: dict[str, pd.DataFrame] = {}
@@ -106,10 +106,9 @@ def retrain_daily(market: str = "all", period: str = "5y") -> dict:
             data[ticker] = fetch_fn(ticker)
         except Exception as e:
             logger.error("  [FAIL 데이터] %s: %s", ticker, e)
-
     logger.info("다운로드 완료: %d / %d개", len(data), len(tickers))
 
-    # ── KOSPI 기준지수 다운로드 (kospi_relative_5d/20d 피처 계산용) ────────────
+    # ── KOSPI 기준지수 다운로드 ────────────────────────────────────
     try:
         kospi_df_shared = _fetch("^KS11", period)
         logger.info("KOSPI 기준지수 다운로드 완료: %d행", len(kospi_df_shared))
@@ -117,41 +116,80 @@ def retrain_daily(market: str = "all", period: str = "5y") -> dict:
         logger.warning("KOSPI 다운로드 실패(%s) → kospi_relative_5d=NaN", e)
         kospi_df_shared = None
 
-    # ── 2단계: 모델 학습 (병렬) ─────────────────────────────────────
-    # 학습은 각 스레드가 독립된 DataFrame을 사용하므로 병렬 안전
-    logger.info("2단계: 모델 학습 (병렬 8스레드)")
+    results: dict = {}
 
-    def _train_one(ticker: str):
-        df = data.get(ticker)
-        if df is None:
-            return ticker, None
-        best_metrics = None
-        for agent in ("momentum", "reversion"):
+    # ── 2단계: KR reversion 합산 단일 전역 모델 ──────────────────────
+    if market in ("kr", "all") and kr_tickers:
+        logger.info("2단계: KR reversion 합산 데이터 구성 (%d개 종목)...", len(kr_tickers))
+        rev_dfs = []
+        for ticker in kr_tickers:
+            raw_df = data.get(ticker)
+            if raw_df is None:
+                continue
             try:
-                _, metrics = train(df, ticker, agent=agent, kospi_df=kospi_df_shared)
-                logger.info("  [OK] %s [%s] acc=%.3f auc=%.3f",
-                            ticker, agent, metrics["accuracy"], metrics["auc"])
-                if best_metrics is None or metrics["auc"] > best_metrics["auc"]:
-                    best_metrics = metrics
+                df = add_features(raw_df, kospi_df=kospi_df_shared)
+                labels, future_returns = _triple_barrier_pnl(
+                    df, tp_pct=TP_PCT, sl_pct=SL_PCT, max_holding_days=HORIZON
+                )
+                df = df.copy()
+                df["_label"]         = labels
+                df["_future_return"] = future_returns
+                idx = df.index
+                df["_date"]   = idx.tz_localize(None) if getattr(idx, "tzinfo", None) else idx
+                df["_ticker"] = ticker
+                df = df.dropna(subset=FEATURE_COLS + ["_label", "_future_return"])
+                if len(df) > HORIZON:
+                    df = df.iloc[:-HORIZON]
+                mask = detect_reversion_rows(df).reindex(df.index).fillna(False)
+                df   = df[mask]
+                if len(df) >= 10:
+                    rev_dfs.append(df)
             except Exception as e:
-                logger.warning("  [SKIP] %s [%s]: %s", ticker, agent, e)
-        if best_metrics is None:
-            logger.error("  [FAIL] %s 두 에이전트 모두 학습 실패", ticker)
-        return ticker, best_metrics
+                logger.warning("  [SKIP] %s reversion 피처 실패: %s", ticker, e)
 
-    results = {}
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        for ticker, metrics in pool.map(_train_one, list(data.keys())):
-            results[ticker] = metrics
+        if rev_dfs:
+            combined_rev = pd.concat(rev_dfs).sort_values("_date").reset_index(drop=True)
+            logger.info("  reversion 합산: %d행 / %d개 종목", len(combined_rev), len(rev_dfs))
+            try:
+                _, global_metrics = train_global(combined_rev, agent="reversion")
+                results["_global_reversion"] = global_metrics
+                logger.info("  KR reversion 전역 모델 완료 auc=%.4f acc=%.3f",
+                            global_metrics["auc"], global_metrics["accuracy"])
+            except Exception as e:
+                logger.error("  KR reversion 전역 모델 학습 실패: %s", e)
+                results["_global_reversion"] = None
+        else:
+            logger.error("reversion 합산 데이터 없음 — 전역 모델 학습 건너뜀")
+            results["_global_reversion"] = None
 
-    # 다운로드 실패 종목도 결과에 포함
-    for ticker in tickers:
-        if ticker not in results:
-            results[ticker] = None
+    # ── 3단계: US 종목별 학습 (기존 방식 유지) ───────────────────────
+    if market in ("us", "all"):
+        from concurrent.futures import ThreadPoolExecutor
+        us_tickers = [t for t in tickers if not (t.endswith(".KS") or t.endswith(".KQ"))]
+        if us_tickers:
+            logger.info("3단계: US 종목별 재학습 (%d개)...", len(us_tickers))
+
+            def _train_us(ticker: str):
+                df = data.get(ticker)
+                if df is None:
+                    return ticker, None
+                best = None
+                for agent in ("momentum", "reversion"):
+                    try:
+                        _, m = train(df, ticker, agent=agent)
+                        if best is None or m["auc"] > best["auc"]:
+                            best = m
+                    except Exception as e:
+                        logger.warning("  [SKIP] %s [%s]: %s", ticker, agent, e)
+                return ticker, best
+
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                for ticker, metrics in pool.map(_train_us, us_tickers):
+                    results[ticker] = metrics
 
     ok   = sum(1 for v in results.values() if v)
     fail = len(results) - ok
-    logger.info("일일 재학습 완료: 성공 %d / 실패 %d", ok, fail)
+    logger.info("재학습 완료: 성공 %d / 실패 %d", ok, fail)
     return results
 
 
