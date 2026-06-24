@@ -386,7 +386,11 @@ def evaluate_positions_auto(trade_day: bool = False) -> list[dict]:
         if pos.get("agent") == "trend"
     }
     if trend_tickers:
-        from ml.features import add_features
+        # 라이브 trend 진입(runner)·백테스트(combined_v2)와 동일한 지표 소스 사용.
+        # add_features는 ma20/adx 컬럼을 생성하지 않아 evaluate_positions의 MA20/ADX
+        # 청산이 발동하지 못한다(죽은 코드). ma20·adx·atr를 만드는
+        # trend_agent.compute_indicators로 교체해 백테스트와 청산 로직을 일치시킨다.
+        from trend_agent import compute_indicators as _ti_compute
         for tkr in trend_tickers:
             try:
                 raw_df = yf.download(tkr, period="3mo", interval="1d",
@@ -394,7 +398,7 @@ def evaluate_positions_auto(trade_day: bool = False) -> list[dict]:
                 if len(raw_df) >= 25:
                     raw_df.columns = [c[0] if isinstance(c, tuple) else c
                                       for c in raw_df.columns]
-                    df_map[tkr] = add_features(raw_df)
+                    df_map[tkr] = _ti_compute(raw_df)
             except Exception as e:
                 logger.debug("[Paper] trend df 조회 실패 %s: %s", tkr, e)
 
