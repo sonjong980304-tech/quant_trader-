@@ -386,7 +386,7 @@ Built with `create_react_agent` (langgraph.prebuilt) + `MemorySaver` checkpointe
        │    │   MemorySaver checkpointer — per-user thread_id       │
        │    └───────────────────────────────────────────────────────┘
        │
-       ├── [07:30] ml/trainer.py — XGBoost parallel retraining (change rate > 0% + top 100 by trading value)
+       ├── [07:30, quarterly] ml/trainer.py — Expanding Window + PIT top-200 XGBoost retraining (Jan/Apr/Jul/Oct 1st)
        │
        ├── [08:00] morning_briefer.py — holdings news + market overview
        │
