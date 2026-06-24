@@ -263,23 +263,35 @@ def evaluate_positions(price_map: dict[str, float], trade_day: bool = True,
         reason = None
         agent  = pos.get("agent", "reversion")
         if agent == "trend":
-            # trend: TP 없음, trailing stop 2.0×ATR, 만기 60거래일
+            # trend: trailing 2×ATR → MA20 이탈 → ADX<20 → 60거래일 만기
             atr_entry  = pos.get("atr_at_entry", 0.0)
             trail_stop = pos["highest"] - 2.0 * atr_entry if atr_entry > 0 else entry * 0.85
             if cur < trail_stop:
                 reason = "trail"
                 exit_price = cur
-            elif pos["trade_days"] >= 60:
+            else:
+                df = (df_map or {}).get(ticker)
+                if df is not None and len(df) >= 1:
+                    last_row = df.iloc[-1]
+                    ma20 = float(last_row["ma20"]) if "ma20" in df.columns else None
+                    adx  = float(last_row["adx"])  if "adx"  in df.columns else None
+                    if ma20 is not None and cur < ma20:
+                        reason = "ma20"
+                        exit_price = cur
+                    elif adx is not None and adx < 20:
+                        reason = "adx"
+                        exit_price = cur
+            if reason is None and pos["trade_days"] >= 60:
                 reason = "time"
                 exit_price = cur
         else:
-            # reversion: TP +15% / SL -8% / 10거래일 만기
-            if raw >= TP_PCT:
-                reason = "TP"
-                exit_price = entry * (1 + TP_PCT)
-            elif raw <= -SL_PCT:
+            # reversion: SL -8% 우선 / TP +15% / 10거래일 만기
+            if raw <= -SL_PCT:
                 reason = "SL"
                 exit_price = entry * (1 - SL_PCT)
+            elif raw >= TP_PCT:
+                reason = "TP"
+                exit_price = entry * (1 + TP_PCT)
             elif pos["trade_days"] >= MAX_HOLD_DAYS:
                 reason = "time"
                 exit_price = cur
