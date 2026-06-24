@@ -937,7 +937,9 @@ def retrain_kr_models(_is_retry: bool = False):
                 _retrain_retry_kr = None
 
             global_m    = results.get("_global_reversion") or {}
-            new_auc     = global_m.get("auc",      0.0)
+            # 최근 fold AUC (가장 현재 시장에 가까운 검증 구간) 우선 사용
+            fold_aucs   = global_m.get("fold_aucs", [])
+            new_auc     = float(fold_aucs[-1][1]) if fold_aucs else global_m.get("auc", 0.0)
             avg_acc     = global_m.get("accuracy", 0.0)
             new_avg_win = global_m.get("avg_win",  0.0)
             AUC_THRESHOLD = 0.55
