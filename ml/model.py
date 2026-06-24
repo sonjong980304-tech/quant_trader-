@@ -355,9 +355,11 @@ def train_global(combined_df: pd.DataFrame, agent: str,
         "above_55": round(float((_op >= 0.55).mean()), 4) if valid_mask.any() else None,
     }
 
+    last_fold_auc = float(fold_aucs[-1][1]) if fold_aucs else auc
     metrics = {
         "accuracy":                  round(acc, 4),
-        "auc":                       round(auc, 4),
+        "auc":                       round(last_fold_auc, 4),
+        "oof_auc":                   round(auc, 4),
         "avg_win":                   round(avg_win, 4),
         "avg_loss":                  round(avg_loss, 4),
         "n_samples":                 len(X),
