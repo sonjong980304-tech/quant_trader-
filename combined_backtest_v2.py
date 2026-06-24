@@ -685,7 +685,7 @@ print(f"{'='*87}")
 print(f"\n[연도별 수익률]")
 hdr = f"  {'연도':>5}" + "".join(f"  {lbl:>{W}}" for lbl, _ in configs)
 print(hdr)
-print("  " + "-" * (7 + (W+2)*3))
+print("  " + "-" * (7 + (W+2)*4))
 for y in YEARS:
     row = f"  {y:>5}"
     for _, r in configs:
