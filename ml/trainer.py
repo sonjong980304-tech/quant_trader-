@@ -103,8 +103,20 @@ def retrain_daily(market: str = "all", period: str = "5y") -> dict:
     tickers = list(tickers_dict.keys())
     logger.info("재학습 시작: %d개 종목 (market=%s)", len(tickers), market)
 
+    # 3y 전용 WF fold (최근 시장 패턴에 최적화)
+    _WF_3Y = [
+        ("2023-07-01", "2025-01-01", "2026-01-01"),
+        ("2023-07-01", "2026-01-01", "2027-01-01"),
+    ]
+    wf_folds_kr = _WF_3Y if period == "3y" else None  # None → model.py 기본값
+
     # ── 1단계: 데이터 다운로드 (직렬) ──────────────────────────────
-    fetch_fn = fetch_10y if period == "10y" else fetch_5y
+    if period == "10y":
+        fetch_fn = fetch_10y
+    elif period == "3y":
+        fetch_fn = fetch_3y
+    else:
+        fetch_fn = fetch_5y
     logger.info("1단계: 데이터 다운로드 (직렬, %s)", period)
     data: dict[str, pd.DataFrame] = {}
     for ticker in tickers:
