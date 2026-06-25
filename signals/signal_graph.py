@@ -166,6 +166,26 @@ _signal_graph = _build_signal_graph()
 
 # ── 공개 API ──────────────────────────────────────────────────────────────
 
+@contextmanager
+def _no_tracing():
+    """신호 그래프 실행 구간만 LangSmith 트레이싱 비활성화.
+
+    state 안에 pandas DataFrame/Timestamp가 들어가 LangChainTracer가
+    직렬화에 실패('keys must be ... not Timestamp')하며 매 종목마다 에러 로그를
+    뱉는다. 트레이싱은 신호 탐지에 무의미하므로 함수 스코프로만 끄고 복원한다.
+    (AI 어시스턴트 등 같은 프로세스의 다른 LangChain 호출엔 영향 없음.)
+    """
+    _prev = os.environ.get("LANGCHAIN_TRACING_V2")
+    os.environ["LANGCHAIN_TRACING_V2"] = "false"
+    try:
+        yield
+    finally:
+        if _prev is None:
+            os.environ.pop("LANGCHAIN_TRACING_V2", None)
+        else:
+            os.environ["LANGCHAIN_TRACING_V2"] = _prev
+
+
 def scan_ticker_graph(ticker: str, name: str, df) -> dict | None:
     """
     LangGraph 기반 단일 종목 신호 탐지.
@@ -174,7 +194,8 @@ def scan_ticker_graph(ticker: str, name: str, df) -> dict | None:
     if ticker in BLACKLIST:
         return None
     try:
-        result = _signal_graph.invoke({
+        with _no_tracing():
+            result = _signal_graph.invoke({
             "ticker":           ticker,
             "name":             name,
             "df":               df,
