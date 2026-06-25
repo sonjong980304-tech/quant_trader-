@@ -77,7 +77,11 @@ def _load(path: str, default: Any) -> Any:
         return default
     try:
         with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+        # 타입 가드: 기대 타입(예: list)과 다르면(손상되어 {} 등) default로 폴백
+        if type(data) is not type(default):
+            return default
+        return data
     except Exception:
         return default
 
