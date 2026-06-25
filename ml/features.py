@@ -113,8 +113,8 @@ def add_features(
     df["atr_pct"] = df["atr_14"] / df["Close"].replace(0, np.nan)
 
     # ── 52주 고저 이격도 ──────────────────────────────
-    high52         = df["Close"].rolling(252).max()
-    low52          = df["Close"].rolling(252).min()
+    high52         = df["Close"].rolling(252, min_periods=200).max()
+    low52          = df["Close"].rolling(252, min_periods=200).min()
     df["high52_pct"] = (df["Close"] - high52) / high52.replace(0, np.nan)
     df["low52_pct"]  = (df["Close"] - low52)  / low52.replace(0, np.nan)
 
