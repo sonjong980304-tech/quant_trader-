@@ -510,6 +510,43 @@ quant_trader/
 
 ---
 
+## 📊 Streamlit 대시보드
+
+페이퍼 트레이딩과 실제 매매를 탭으로 분리해 시각화하는 웹 대시보드입니다.
+봇 데이터(JSON/CSV)를 **읽기 전용**으로 사용하며, 봇 코드에는 영향을 주지 않습니다.
+
+### 실행
+
+```bash
+# 의존성 설치 (최초 1회)
+pip install -r requirements.txt   # streamlit, plotly 포함
+
+# 대시보드 실행 (봇과 동일한 파이썬 환경에서)
+python3 -m streamlit run dashboard/app.py
+# 또는
+streamlit run dashboard/app.py
+```
+
+실행 후 브라우저에서 `http://localhost:8501` 접속.
+
+### 구성
+
+| 파일 | 역할 |
+|------|------|
+| `dashboard/app.py` | 메인 앱 (페이퍼 / 실매매 탭) |
+| `dashboard/data_loader.py` | 기존 JSON/CSV 데이터 읽기 |
+| `dashboard/kis_live.py` | KIS 실시간 현재가 조회(10초 캐싱) |
+| `dashboard/charts.py` | plotly 그래프 모음 |
+
+- **탭 A (페이퍼)**: 전종목 신호 테이블(필터/정렬), 누적수익 곡선, 에이전트별·트리거별 성과
+- **탭 B (실매매)**: 보유 포지션 실시간 손익(KIS 라이브, 손절 근접 ⚠️), 매매 이력, 누적 실현손익
+- 사이드바에서 **30초 자동 새로고침** 토글 가능
+
+> 참고: 페이퍼 신호의 AUC는 저장되지 않아 모델 메타값으로 표시하며, 실매매 CSV에는
+> 에이전트/트리거 컬럼이 없어 `strategy`로 그룹핑합니다.
+
+---
+
 ## 주의사항
 
 1. `.env` 파일은 절대 GitHub에 커밋하지 마세요.
