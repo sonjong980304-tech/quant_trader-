@@ -556,6 +556,8 @@ def scan_growth_signals_eod():
                             continue
                         if not (float(_r["ma5"]) > float(_r["ma20"]) > float(_r["ma60"]) > float(_r["ma200"])):
                             continue
+                        if float(_r["Close"]) <= float(_r["ma20"]):   # 종가가 ma20 위일 때만 진입(청산 cl<ma20과 짝)
+                            continue
                         _vma = float(_r.get("vol_ma20") or 0)
                         if _vma == 0 or float(_r["Volume"]) < _vma * 1.3:
                             continue
