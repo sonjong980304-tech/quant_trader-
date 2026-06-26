@@ -429,6 +429,8 @@ def build_signals(fold_models, universe_by_year: dict | None = None):
                 continue
             if not (r["ma5"] > r["ma20"] > r["ma60"] > r["ma200"]):
                 continue
+            if r["Close"] <= r["ma20"]:   # 종가가 ma20 위일 때만 진입(청산 규칙 cl<ma20과 짝)
+                continue
             if r["vol_ma20"] == 0 or r["Volume"] < r["vol_ma20"] * TR_VOL:
                 continue
             km200 = kospi_ma200.get(date, np.nan)
