@@ -33,6 +33,7 @@ TELEGRAM_CHAT_ID    = os.getenv("TELEGRAM_CHAT_ID", "")
 OPENAI_API_KEY      = os.getenv("OPENAI_API_KEY", "")
 NAVER_CLIENT_ID     = os.getenv("NAVER_CLIENT_ID", "")
 NAVER_CLIENT_SECRET = os.getenv("NAVER_CLIENT_SECRET", "")
+FINNHUB_API_KEY     = os.getenv("FINNHUB_API_KEY", "")
 
 # ─────────────────────────────────────────────
 # 매매 대상 종목 (stocks.py에서 로드 — GitHub 비공개)
