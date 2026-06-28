@@ -85,6 +85,54 @@ def _get_us_indices() -> str:
     return "\n".join(lines) if lines else "지수 조회 실패"
 
 
+def _get_finnhub_events() -> str:
+    """
+    Finnhub 경제 캘린더에서 오늘(KST)부터 30일 이내 high/medium 영향 이벤트 조회.
+    형식: "- 이벤트명: YYYY-MM-DD" (날짜순 상위 10개).
+    API 키가 없거나 조회 실패 시 빈 문자열 반환.
+    """
+    import os
+    api_key = os.getenv("FINNHUB_API_KEY", "")
+    if not api_key:
+        return ""
+
+    try:
+        import requests
+        from datetime import timedelta
+        now = datetime.now(KST)
+        frm = now.strftime("%Y-%m-%d")
+        to  = (now + timedelta(days=30)).strftime("%Y-%m-%d")
+        resp = requests.get(
+            "https://finnhub.io/api/v1/calendar/economic",
+            params={"from": frm, "to": to, "token": api_key},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json().get("economicCalendar", []) or []
+    except Exception as e:
+        logger.warning("Finnhub 이벤트 조회 실패: %s", e)
+        return ""
+
+    # impact high/medium만 필터, time에서 날짜(YYYY-MM-DD) 추출
+    events = []
+    for item in data:
+        impact = str(item.get("impact", "")).lower()
+        if impact not in ("high", "medium"):
+            continue
+        name = str(item.get("event", "")).strip()
+        date = str(item.get("time", "")).strip().split(" ")[0]
+        if not name or not date:
+            continue
+        events.append((date, name))
+
+    if not events:
+        return ""
+
+    events.sort(key=lambda x: x[0])   # 날짜순
+    lines = [f"- {name}: {date}" for date, name in events[:10]]
+    return "\n".join(lines)
+
+
 def _gather_context() -> dict:
     """미국 증시 / 보유종목 뉴스 / 경제 캘린더를 병렬 검색 + 실제 지수 데이터 직접 조회"""
     now        = datetime.now(KST)
