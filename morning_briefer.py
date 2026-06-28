@@ -254,11 +254,40 @@ def _find_event_dates(context: dict) -> dict:
         except Exception as e:
             logger.warning("  [이벤트 날짜 검색 실패] %s: %s", name, e)
 
+    # ── 과거 이벤트 제거 (문제 1: LLM 누락 보강) ──────────────────────
+    # YYYY-MM-DD 형식이고 오늘(KST)보다 이전이면 제거. 미확인/형식불명은 유지.
+    today_str = datetime.now(KST).strftime("%Y-%m-%d")
+    filtered: dict[str, str] = {}
+    for name, date in events.items():
+        if date == "미확인":
+            filtered[name] = date
+            continue
+        try:
+            datetime.strptime(date, "%Y-%m-%d")
+        except ValueError:
+            filtered[name] = date   # YYYY-MM-DD 형식이 아니면 안전하게 유지
+            continue
+        if date < today_str:        # 동일 형식이므로 문자열 비교 = 날짜 비교
+            logger.info("  [과거 이벤트 제거] %s: %s", name, date)
+            continue
+        filtered[name] = date
+    events = filtered
+
     lines = [
         f"- {name}: {'날짜 미확인' if date == '미확인' else date}"
         for name, date in events.items()
     ]
-    context["confirmed_events"] = "\n".join(lines) if lines else "예정된 이벤트 없음"
+    llm_result = "\n".join(lines) if lines else ""
+
+    # ── Finnhub 우선 (문제 2) ────────────────────────────────────────
+    # finnhub_events가 있으면 confirmed_events로 사용한다. 위 Tavily 미확인
+    # 날짜 추가 검색 로직은 그대로 수행되며, Finnhub가 없을 때만 LLM/Tavily
+    # 추출 결과를 사용한다.
+    finnhub_events = context.get("finnhub_events", "")
+    if finnhub_events:
+        context["confirmed_events"] = finnhub_events
+    else:
+        context["confirmed_events"] = llm_result if llm_result else "예정된 이벤트 없음"
     return context
 
 
