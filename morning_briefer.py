@@ -217,11 +217,11 @@ def _find_event_dates(context: dict) -> dict:
         raw = resp.choices[0].message.content.strip()
     except Exception as e:
         logger.warning("이벤트 추출 실패: %s", e)
-        context["confirmed_events"] = "이벤트 조회 실패"
+        context["confirmed_events"] = context.get("finnhub_events", "") or "이벤트 조회 실패"
         return context
 
     if raw == "없음":
-        context["confirmed_events"] = "예정된 이벤트 없음"
+        context["confirmed_events"] = context.get("finnhub_events", "") or "예정된 이벤트 없음"
         return context
 
     # 파싱
