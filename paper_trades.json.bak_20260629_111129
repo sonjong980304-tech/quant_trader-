@@ -275,14 +275,14 @@
     "position_size_pct": 0.0,
     "kelly_fraction": null,
     "auc_at_signal": null,
-    "exit_timestamp": "2026-06-29 11:11:58",
-    "exit_price": 749000.0,
-    "exit_reason": "trail",
-    "raw_pnl_pct": -13.71,
-    "net_pnl_pct": -13.97,
-    "is_win": 0,
-    "holding_days": 1,
-    "status": "closed"
+    "exit_timestamp": null,
+    "exit_price": null,
+    "exit_reason": null,
+    "raw_pnl_pct": null,
+    "net_pnl_pct": null,
+    "is_win": null,
+    "holding_days": null,
+    "status": "open"
   },
   {
     "signal_id": "19c8156a",
@@ -320,9 +320,7 @@
     "ticker": "347850.KQ",
     "name": "디앤디파마텍",
     "agent": "reversion",
-    "trigger_types": [
-      "이격도저점"
-    ],
+    "trigger_types": [],
     "win_prob": 0.5821,
     "avg_win": 0.099,
     "avg_loss": 0.0648,
@@ -352,9 +350,7 @@
     "ticker": "319400.KQ",
     "name": "현대무벡스",
     "agent": "reversion",
-    "trigger_types": [
-      "이격도저점"
-    ],
+    "trigger_types": [],
     "win_prob": 0.6286,
     "avg_win": 0.099,
     "avg_loss": 0.0648,

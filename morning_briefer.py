@@ -85,51 +85,55 @@ def _get_us_indices() -> str:
     return "\n".join(lines) if lines else "지수 조회 실패"
 
 
-def _get_finnhub_events() -> str:
+def _get_forexfactory_events() -> str:
     """
-    Finnhub 경제 캘린더에서 오늘(KST)부터 30일 이내 high/medium 영향 이벤트 조회.
-    형식: "- 이벤트명: YYYY-MM-DD" (날짜순 상위 10개).
-    API 키가 없거나 조회 실패 시 빈 문자열 반환.
+    ForexFactory 경제 캘린더(무료, this week + next week)에서 High 영향 이벤트 조회.
+    오늘(KST)부터 미래 이벤트만, 날짜는 ET → KST 변환 후 추출.
+    형식: "- 이벤트명 (통화): YYYY-MM-DD" (날짜순, 상위 15개).
+    조회 실패 또는 해당 이벤트 없으면 빈 문자열 반환.
     """
-    import os
-    api_key = os.getenv("FINNHUB_API_KEY", "")
-    if not api_key:
+    import requests
+
+    urls = [
+        "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
+        "https://nfs.faireconomy.media/ff_calendar_nextweek.json",
+    ]
+    raw_events = []
+    for url in urls:
+        try:
+            resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+            resp.raise_for_status()
+            raw_events.extend(resp.json() or [])
+        except Exception as e:
+            logger.warning("ForexFactory 조회 실패 (%s): %s", url, e)
+
+    if not raw_events:
         return ""
 
-    try:
-        import requests
-        from datetime import timedelta
-        now = datetime.now(KST)
-        frm = now.strftime("%Y-%m-%d")
-        to  = (now + timedelta(days=30)).strftime("%Y-%m-%d")
-        resp = requests.get(
-            "https://finnhub.io/api/v1/calendar/economic",
-            params={"from": frm, "to": to, "token": api_key},
-            timeout=10,
-        )
-        resp.raise_for_status()
-        data = resp.json().get("economicCalendar", []) or []
-    except Exception as e:
-        logger.warning("Finnhub 이벤트 조회 실패: %s", e)
-        return ""
-
-    # impact high/medium만 필터, time에서 날짜(YYYY-MM-DD) 추출
+    today_str = datetime.now(KST).strftime("%Y-%m-%d")
     events = []
-    for item in data:
-        impact = str(item.get("impact", "")).lower()
-        if impact not in ("high", "medium"):
+    for e in raw_events:
+        if str(e.get("impact", "")) != "High":   # High 영향만
             continue
-        name = str(item.get("event", "")).strip()
-        date = str(item.get("time", "")).strip().split(" ")[0]
-        if not name or not date:
+        title    = str(e.get("title", "")).strip()
+        country  = str(e.get("country", "")).strip()
+        date_iso = str(e.get("date", "")).strip()
+        if not title or not date_iso:
             continue
-        events.append((date, name))
+        # ISO8601(ET 오프셋) → KST 변환 → 날짜(YYYY-MM-DD)
+        try:
+            date = datetime.fromisoformat(date_iso).astimezone(KST).strftime("%Y-%m-%d")
+        except Exception:
+            date = date_iso[:10]   # 파싱 실패 시 앞 10자 폴백
+        if date < today_str:       # 과거 이벤트 제외
+            continue
+        events.append((date, title, country))
 
     if not events:
         return ""
 
     events.sort(key=lambda x: x[0])   # 날짜순
-    lines = [f"- {name}: {date}" for date, name in events[:10]]
+    lines = [f"- {title} ({country}): {date}" for date, title, country in events[:15]]
     return "\n".join(lines)
 
 
