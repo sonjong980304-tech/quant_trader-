@@ -364,7 +364,11 @@ def _evaluate_context_recall(briefing: str, context: dict) -> tuple:
     client = OpenAI(api_key=OPENAI_API_KEY)
 
     stock_news = context.get("stock_news", "")
-    has_stock_news = bool(stock_news.strip()) and stock_news != "검색 결과 없음"
+    # 관심종목이 비어있으면(보유 0건 등) 종목 뉴스 평가 자체가 무의미 → 항목4 패스
+    has_holdings   = bool(context.get("holding_names"))
+    has_stock_news = (bool(stock_news.strip())
+                      and stock_news != "검색 결과 없음"
+                      and has_holdings)
 
     ctx_text = (
         f"[미국 증시 뉴스]\n{context.get('us_market', '')[:1500]}\n\n"
