@@ -30,16 +30,15 @@ KST    = pytz.timezone("Asia/Seoul")
 # 웹 검색
 # ─────────────────────────────────────────────
 
-def _search(query: str, k: int = 5, days: int = 2) -> str:
-    """Tavily 검색 결과를 문자열로 반환 (days: 최근 N일 이내 결과만)"""
+def _search(query: str, k: int = 5, days: int = 2, include_domains: list = None) -> str:
+    """Tavily 검색 결과를 문자열로 반환.
+    days: 최근 N일 이내 결과만. include_domains: 특정 도메인으로 결과 한정(시황 매체 등)."""
     import os
     client  = TavilyClient(api_key=os.getenv("TAVILY_API_KEY", ""))
-    results = client.search(
-        query,
-        max_results=k,
-        days=days,
-        search_depth="advanced",
-    )["results"]
+    params  = dict(query=query, max_results=k, days=days, search_depth="advanced")
+    if include_domains:
+        params["include_domains"] = include_domains
+    results = client.search(**params)["results"]
     return "\n\n".join(
         f"[출처: {r['url']}]\n{r['content']}"
         for r in results
