@@ -47,20 +47,41 @@ def _search(query: str, k: int = 5, days: int = 2, include_domains: list = None)
 
 def _get_holding_names() -> list[str]:
     """
-    KIS API에서 실제 보유 종목명 조회.
-    실패 시 config STOCKS 목록으로 폴백.
+    관심종목명 조회 — KIS 실보유 + 페이퍼 보유(paper_positions.json) 합집합.
+    둘 다 없으면 config STOCKS 목록으로 폴백.
     """
+    names: list[str] = []
+
+    # 1. KIS 실보유 종목
     try:
         from config import KIS_APP_KEY
         if KIS_APP_KEY:
             from trader import KISTrader
             holdings = KISTrader().get_balance()
-            names = [h["name"] for h in holdings if h.get("name")]
-            if names:
-                return names
+            names.extend(h["name"] for h in holdings if h.get("name"))
     except Exception:
         pass
-    # 폴백: 관심종목 전체
+
+    # 2. 페이퍼 트레이딩 보유 종목 (paper_positions.json)
+    try:
+        import json
+        import os
+        pos_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "paper_positions.json")
+        if os.path.exists(pos_path):
+            with open(pos_path, encoding="utf-8") as f:
+                positions = json.load(f)
+            if isinstance(positions, dict):
+                names.extend(v.get("name") for v in positions.values() if v.get("name"))
+    except Exception:
+        pass
+
+    # 중복 제거(순서 유지)
+    names = [n for n in dict.fromkeys(names) if n]
+    if names:
+        return names
+
+    # 3. 폴백: 관심종목 전체
     return list(STOCKS.values())
 
 
