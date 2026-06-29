@@ -87,16 +87,18 @@ def _get_us_indices() -> str:
 
 def _get_forexfactory_events() -> str:
     """
-    ForexFactory 경제 캘린더(무료, this week + next week)에서 High 영향 이벤트 조회.
+    ForexFactory 경제 캘린더(무료, this week)에서 High 영향 이벤트 조회.
     오늘(KST)부터 미래 이벤트만, 날짜는 ET → KST 변환 후 추출.
     형식: "- 이벤트명 (통화): YYYY-MM-DD" (날짜순, 상위 15개).
     조회 실패 또는 해당 이벤트 없으면 빈 문자열 반환.
+
+    참고: faireconomy.media 미러는 thisweek만 제공(nextweek/lastweek는 404).
+          thisweek가 당주 월~일 일정을 모두 담아 모닝브리핑엔 충분하다.
     """
     import requests
 
     urls = [
         "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
-        "https://nfs.faireconomy.media/ff_calendar_nextweek.json",
     ]
     raw_events = []
     for url in urls:
