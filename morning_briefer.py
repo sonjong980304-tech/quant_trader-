@@ -283,13 +283,13 @@ def _find_event_dates(context: dict) -> dict:
     ]
     llm_result = "\n".join(lines) if lines else ""
 
-    # ── Finnhub 우선 (문제 2) ────────────────────────────────────────
-    # finnhub_events가 있으면 confirmed_events로 사용한다. 위 Tavily 미확인
-    # 날짜 추가 검색 로직은 그대로 수행되며, Finnhub가 없을 때만 LLM/Tavily
+    # ── ForexFactory 우선 (문제 2) ───────────────────────────────────
+    # calendar_events가 있으면 confirmed_events로 사용한다. 위 Tavily 미확인
+    # 날짜 추가 검색 로직은 그대로 수행되며, 캘린더가 없을 때만 LLM/Tavily
     # 추출 결과를 사용한다.
-    finnhub_events = context.get("finnhub_events", "")
-    if finnhub_events:
-        context["confirmed_events"] = finnhub_events
+    calendar_events = context.get("calendar_events", "")
+    if calendar_events:
+        context["confirmed_events"] = calendar_events
     else:
         context["confirmed_events"] = llm_result if llm_result else "예정된 이벤트 없음"
     return context
