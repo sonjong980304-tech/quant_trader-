@@ -149,15 +149,23 @@ def _gather_context() -> dict:
     holding_names = _get_holding_names()
     stock_list    = " OR ".join(holding_names)
 
+    # 시황 "원인 분석" 기사를 위한 신뢰 매체 한정 (야후 가격표 페이지 회피)
+    MARKET_DOMAINS = ["reuters.com", "cnbc.com", "marketwatch.com",
+                      "apnews.com", "investing.com", "businessinsider.com"]
+
+    # 각 항목: (검색 쿼리, _search 추가 옵션)
     queries = {
-        "us_market":     f"US stock market close {us_date} S&P500 Nasdaq Composite Dow Jones recap results",
-        "stock_news":    f"{kst_today} ({stock_list}) 주식 뉴스",
-        "econ_calendar": f"economic calendar {now.strftime('%B %Y')} upcoming events this week global CPI FOMC BOE ECB Bank of England rate decision schedule",
+        "us_market":     (f"Wall Street {us_date} stock market wrap why stocks rose fell "
+                          f"S&P500 Nasdaq Dow Jones analysis",
+                          {"include_domains": MARKET_DOMAINS}),
+        "stock_news":    (f"{kst_today} ({stock_list}) 주식 뉴스", {}),
+        "econ_calendar": (f"economic calendar {now.strftime('%B %Y')} upcoming events this week "
+                          f"global CPI FOMC BOE ECB Bank of England rate decision schedule", {}),
     }
 
     context = {}
     with ThreadPoolExecutor(max_workers=3) as pool:
-        futures = {pool.submit(_search, q): key for key, q in queries.items()}
+        futures = {pool.submit(_search, q, **opts): key for key, (q, opts) in queries.items()}
         for future in as_completed(futures):
             key = futures[future]
             try:
@@ -165,6 +173,9 @@ def _gather_context() -> dict:
             except Exception as e:
                 logger.warning("검색 실패 (%s): %s", key, e)
                 context[key] = "검색 결과 없음"
+
+    # 관심종목 목록 보존 (평가 항목4 패스 판정에 사용)
+    context["holding_names"] = holding_names
 
     # 실제 지수 수치 직접 조회 (AI hallucination 방지)
     context["us_indices"] = _get_us_indices()
