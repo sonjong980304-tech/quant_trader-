@@ -168,10 +168,10 @@ def _gather_context() -> dict:
     # 실제 지수 수치 직접 조회 (AI hallucination 방지)
     context["us_indices"] = _get_us_indices()
 
-    # Finnhub 경제 캘린더 (있으면 _find_event_dates에서 우선 활용)
-    finnhub = _get_finnhub_events()
-    if finnhub:
-        context["finnhub_events"] = finnhub
+    # ForexFactory 경제 캘린더 (있으면 _find_event_dates에서 우선 활용)
+    calendar = _get_forexfactory_events()
+    if calendar:
+        context["calendar_events"] = calendar
 
     # 경제 이벤트 날짜 검증 (날짜 없는 항목은 Tavily 추가 검색)
     context = _find_event_dates(context)
