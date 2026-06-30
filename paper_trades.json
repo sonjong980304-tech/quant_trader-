@@ -54,14 +54,14 @@
     "position_size_pct": 0.0,
     "kelly_fraction": null,
     "auc_at_signal": null,
-    "exit_timestamp": null,
-    "exit_price": null,
-    "exit_reason": null,
-    "raw_pnl_pct": null,
-    "net_pnl_pct": null,
-    "is_win": null,
-    "holding_days": null,
-    "status": "open"
+    "exit_timestamp": "2026-06-30 10:57:54",
+    "exit_price": 191935.0,
+    "exit_reason": "TP",
+    "raw_pnl_pct": 15.0,
+    "net_pnl_pct": 14.74,
+    "is_win": 1,
+    "holding_days": 2,
+    "status": "closed"
   },
   {
     "signal_id": "8e7c7ae8",
