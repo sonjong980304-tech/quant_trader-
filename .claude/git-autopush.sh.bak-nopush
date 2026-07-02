@@ -40,4 +40,4 @@ git diff --cached --quiet && exit 0
 
 changed=$(git diff --cached --name-only | tr '\n' ' ' | sed 's/[[:space:]]*$//')
 git commit -m "auto: ${changed} 수정"
-# git push origin main   # ⛔ 자동 push 비활성화 (2026-07-02) — push는 수동으로 실행할 것
+git push origin main
