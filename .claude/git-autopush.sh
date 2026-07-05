@@ -9,7 +9,7 @@
 
 LOCKDIR=/tmp/quant_autopush.lock
 PENDING=/tmp/quant_autopush.pending
-REPO=/Users/gyuyeong/quant_trader
+REPO=/Users/gyuyeong/projects/quant_trader
 
 read -r f
 [[ "$f" =~ \.(py|md)$ ]] || exit 0

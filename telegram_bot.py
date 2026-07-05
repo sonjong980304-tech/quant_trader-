@@ -37,7 +37,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-CONFIG_PATH = "/Users/gyuyeong/quant_trader/config.py"
+CONFIG_PATH = "/Users/gyuyeong/projects/quant_trader/config.py"
 
 
 # ─────────────────────────────────────────────
@@ -235,7 +235,7 @@ async def cmd_run(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     try:
         result = subprocess.run(
             ["python3", "graph.py"],
-            cwd="/Users/gyuyeong/quant_trader",
+            cwd="/Users/gyuyeong/projects/quant_trader",
             capture_output=True, text=True, timeout=120,
         )
         if result.returncode == 0:

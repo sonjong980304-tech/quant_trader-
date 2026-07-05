@@ -125,7 +125,7 @@ def backtest_ticker(ticker: str, name: str) -> dict | None:
         logger.warning("  [%s] 모델 학습 실패: %s", ticker, e)
         return None
 
-    model_path = f"/Users/gyuyeong/quant_trader/ml/models/{ticker.replace('.','_')}_bt.pkl"
+    model_path = f"/Users/gyuyeong/projects/quant_trader/ml/models/{ticker.replace('.','_')}_bt.pkl"
     if not os.path.exists(model_path):
         return {"ticker": ticker, "name": name, "trades": 0}
 

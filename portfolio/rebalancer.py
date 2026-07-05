@@ -198,7 +198,7 @@ def _update_safe_weights(new_weights: dict):
     """config.py의 SAFE_WEIGHTS를 새 비중으로 업데이트."""
     import re
 
-    config_path = "/Users/gyuyeong/quant_trader/config.py"
+    config_path = "/Users/gyuyeong/projects/quant_trader/config.py"
     with open(config_path, "r", encoding="utf-8") as f:
         content = f.read()
 

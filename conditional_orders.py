@@ -16,7 +16,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-_ORDERS_FILE = Path("/Users/gyuyeong/quant_trader/conditional_orders.json")
+_ORDERS_FILE = Path("/Users/gyuyeong/projects/quant_trader/conditional_orders.json")
 
 
 def _load() -> list:

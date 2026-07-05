@@ -6,13 +6,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash /Users/gyuyeong/quant_trader/.claude/hook-push.sh",
+            "command": "bash /Users/gyuyeong/projects/quant_trader/.claude/hook-push.sh",
             "statusMessage": "GitHub 자동 푸시 중...",
             "async": true
           },
           {
             "type": "command",
-            "command": "bash /Users/gyuyeong/quant_trader/.claude/hook-restart.sh",
+            "command": "bash /Users/gyuyeong/projects/quant_trader/.claude/hook-restart.sh",
             "statusMessage": "봇·스케줄러 재시작 중...",
             "async": true
           }

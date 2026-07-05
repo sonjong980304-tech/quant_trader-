@@ -7,7 +7,7 @@
 #   3. claude CLI로 diff 기반 README 업데이트
 
 LOCKFILE=/tmp/quant_readme_update.lock
-REPO=/Users/gyuyeong/quant_trader
+REPO=/Users/gyuyeong/projects/quant_trader
 
 read -r f
 [[ "$f" =~ \.py$ ]] || exit 0
