@@ -12,6 +12,7 @@ rebalancer.py - 월 1회 자동 몬테카를로 리밸런싱
 """
 
 import logging
+import os
 import numpy as np
 import pandas as pd
 from datetime import datetime, date
@@ -198,7 +199,7 @@ def _update_safe_weights(new_weights: dict):
     """config.py의 SAFE_WEIGHTS를 새 비중으로 업데이트."""
     import re
 
-    config_path = "/Users/gyuyeong/projects/quant_trader/config.py"
+    config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.py")
     with open(config_path, "r", encoding="utf-8") as f:
         content = f.read()
 

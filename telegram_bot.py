@@ -13,6 +13,7 @@ telegram_bot.py - 텔레그램 봇 명령어 처리
 """
 
 import asyncio
+import os
 import re
 import subprocess
 import logging
@@ -37,7 +38,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-CONFIG_PATH = "/Users/gyuyeong/projects/quant_trader/config.py"
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.py")
 
 
 # ─────────────────────────────────────────────
@@ -235,7 +236,7 @@ async def cmd_run(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     try:
         result = subprocess.run(
             ["python3", "graph.py"],
-            cwd="/Users/gyuyeong/projects/quant_trader",
+            cwd=os.path.dirname(os.path.abspath(__file__)),
             capture_output=True, text=True, timeout=120,
         )
         if result.returncode == 0:

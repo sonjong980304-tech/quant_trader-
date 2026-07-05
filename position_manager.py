@@ -8,6 +8,7 @@ position_manager.py - ML 포지션 추적 및 봇 활성화 상태 관리
 
 import json as _json
 import logging
+import os
 from datetime import datetime, timedelta
 
 import yfinance as yf
@@ -33,7 +34,7 @@ def _is_market_open(is_us: bool) -> bool:
     kr_min = now_kst.hour * 60 + now_kst.minute
     return is_kr_trading_day(now_kst.date()) and (9 * 60 <= kr_min < 15 * 60 + 30)
 
-_STATE_FILE = "/Users/gyuyeong/projects/quant_trader/state.json"
+_STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.json")
 
 
 def _load_state() -> dict:

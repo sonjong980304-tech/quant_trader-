@@ -26,7 +26,7 @@ from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 logger = logging.getLogger(__name__)
 
 KST      = pytz.timezone("Asia/Seoul")
-CSV_PATH = "/Users/gyuyeong/projects/quant_trader/trade_history.csv"
+CSV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trade_history.csv")
 
 _FIELDNAMES = [
     "trade_id", "ticker", "name", "side",

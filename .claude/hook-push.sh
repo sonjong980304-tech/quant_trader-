@@ -12,4 +12,4 @@ except Exception as e:
     import sys; print('', file=sys.stderr)
 " 2>>"$LOG")
 echo "[$(date)] hook-push: file=$f" >> "$LOG"
-echo "$f" | bash /Users/gyuyeong/projects/quant_trader/.claude/git-autopush.sh >> "$LOG" 2>&1
+echo "$f" | bash "$(dirname "$0")/git-autopush.sh" >> "$LOG" 2>&1
