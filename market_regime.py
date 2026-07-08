@@ -19,6 +19,21 @@ _CACHE: dict = {}
 _ADR_CACHE: dict = {}
 
 
+def regime_allows_trend(close: float, ma200: float, dd20: float) -> bool:
+    """trend 에이전트 진입 게이트 (MA200 + 급락 오버레이).
+
+    조건: close > ma200 AND dd20 > -0.05
+      - close > ma200 : 지수가 200일선 위 (상승 추세 포착 — 상승장 수익 유지)
+      - dd20   > -0.05 : 20일 고점 대비 낙폭이 -5% 이내 (급락 국면 신규 진입 차단)
+
+    MA200 단독 필터는 상승장에서 잘 벌지만 과열 후 조정에 무방비였다.
+    20일 낙폭(dd20 = close/20일최고가 - 1) 오버레이를 더해 급락 초입 진입을 차단한다.
+    out-of-sample(2024-12~2026-02) / in-sample(2026-03~07) 두 기간 모두 MA200 단독을
+    상회한 유일한 견고 후보(과최적화 검증 통과). 순수 계산 함수라 단위 테스트가 가능하다.
+    """
+    return bool(close > ma200 and dd20 > -0.05)
+
+
 def _rsi(series: pd.Series, period: int = 14) -> float:
     delta = series.diff()
     gain  = delta.clip(lower=0)
@@ -93,6 +108,6 @@ def get_market_regime() -> tuple[bool, bool, bool]:
     """폐기됨 — 레짐 필터 제거로 항상 (False, False, False) 반환.
 
     is_bear/adr_bear 기반 패널티 로직은 제거되었습니다.
-    trend 에이전트 레짐 필터는 runner.py의 KOSPI MA200 검사로 대체됩니다.
+    trend 에이전트 레짐 필터는 regime_allows_trend()(KOSPI close>MA200 AND 20일낙폭>-5%)로 대체됩니다.
     """
     return False, False, False

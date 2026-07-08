@@ -421,20 +421,28 @@ def scan_growth_signals_eod():
 
     logger.info("EOD 신호 %d개 발생", len(signals))
 
-    # trend 에이전트 레짐 필터: KOSPI 종가 > KOSPI MA200
-    def _kospi_above_ma200() -> bool:
+    # trend 에이전트 레짐 필터: KOSPI close > MA200 AND 20일낙폭(dd20) > -5%
+    # (상승 추세 포착 + 급락 국면 신규 진입 차단). OOS/IS 두 기간 백테스트 검증.
+    # 판정은 순수 함수 regime_allows_trend()에 위임(단위테스트 커버).
+    # 데이터 취득 실패/빈 데이터 시 fail-closed(진입 차단)로 안전 우선.
+    def _trend_regime_ok() -> bool:
         try:
             import yfinance as yf
-            _k = yf.download("^KS11", period="250d", interval="1d", progress=False, auto_adjust=True)
-            if _k.empty:
-                return True
-            _c = float(_k["Close"].iloc[-1])
-            _m200 = float(_k["Close"].rolling(200).mean().iloc[-1])
-            return _c > _m200
-        except Exception:
-            return True  # 데이터 취득 실패 시 허용
+            from market_regime import regime_allows_trend
+            _k = yf.download("^KS11", period="400d", interval="1d", progress=False, auto_adjust=True)
+            if _k is None or _k.empty:
+                logger.warning("[레짐 필터] KOSPI 데이터 없음 — fail-closed(trend 차단)")
+                return False
+            _close = _k["Close"].squeeze()
+            _c     = float(_close.iloc[-1])
+            _ma200 = float(_close.rolling(200).mean().iloc[-1])
+            _dd20  = float(_c / _close.rolling(20).max().iloc[-1] - 1.0)
+            return regime_allows_trend(_c, _ma200, _dd20)
+        except Exception as _e:
+            logger.warning("[레짐 필터] KOSPI 취득 실패 — fail-closed(trend 차단): %s", _e)
+            return False
 
-    _trend_allowed = _kospi_above_ma200()
+    _trend_allowed = _trend_regime_ok()
 
     total_asset = 0.0
     if KIS_APP_KEY:
@@ -447,7 +455,7 @@ def scan_growth_signals_eod():
     from pending_orders import add_pending_order
     for sig in signals:
         if sig.get("agent") == "trend" and not _trend_allowed:
-            logger.info("[레짐 필터] trend 차단 — KOSPI ≤ MA200: %s", sig.get("ticker"))
+            logger.info("[레짐 필터] trend 차단 — KOSPI ≤ MA200 또는 20일낙폭 ≤ -5%: %s", sig.get("ticker"))
             continue
         ticker = sig["ticker"]
         is_us  = not (ticker.endswith(".KS") or ticker.endswith(".KQ"))

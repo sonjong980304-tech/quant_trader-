@@ -61,7 +61,7 @@ def retrain_daily(market: str = "all", period: str = "5y") -> dict:
     반환: {"_global_reversion": metrics, ...US tickers...}
     """
     from ml.model import train, train_global
-    from ml.features import add_features, _triple_barrier_pnl, FEATURE_COLS, detect_reversion_rows
+    from ml.features import add_features, _triple_barrier_pnl, FEATURE_COLS_REVERSION, detect_reversion_rows
     from config import TP_PCT, SL_PCT, EOD_HORIZON as HORIZON
 
     tickers_dict: dict = {}
@@ -155,7 +155,7 @@ def retrain_daily(market: str = "all", period: str = "5y") -> dict:
                 idx = df.index
                 df["_date"]   = idx.tz_localize(None) if getattr(idx, "tzinfo", None) else idx
                 df["_ticker"] = ticker
-                df = df.dropna(subset=FEATURE_COLS + ["_label", "_future_return"])
+                df = df.dropna(subset=FEATURE_COLS_REVERSION + ["_label", "_future_return"])
                 if len(df) > HORIZON:
                     df = df.iloc[:-HORIZON]
                 mask = detect_reversion_rows(df).reindex(df.index).fillna(False)
@@ -169,7 +169,10 @@ def retrain_daily(market: str = "all", period: str = "5y") -> dict:
             combined_rev = pd.concat(rev_dfs).sort_values("_date").reset_index(drop=True)
             logger.info("  reversion 합산: %d행 / %d개 종목", len(combined_rev), len(rev_dfs))
             try:
-                _, global_metrics = train_global(combined_rev, agent="reversion", wf_folds=wf_folds_kr)
+                _, global_metrics = train_global(
+                    combined_rev, agent="reversion",
+                    feature_cols=FEATURE_COLS_REVERSION, wf_folds=wf_folds_kr,
+                )
                 results["_global_reversion"] = global_metrics
                 logger.info("  KR reversion 전역 모델 완료 auc=%.4f acc=%.3f",
                             global_metrics["auc"], global_metrics["accuracy"])

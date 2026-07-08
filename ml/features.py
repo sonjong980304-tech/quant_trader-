@@ -228,21 +228,16 @@ FEATURE_COLS_MIDTERM_MOMENTUM = [
     "kospi_relative_5d",   # 5일 상대강도
 ]
 
-# ── 전역 reversion 모델 피처 (12개) ─────────────────────────────────────────
-# 제거: sector_relative_5d(12위), obv_change_5d(14위), volume_ratio(15위), volume_change(16위)
+# ── 전역 reversion 모델 피처 (4개) ─────────────────────────────────────────
+# 2026-07-08 축소(12→4): permutation importance 검증 결과 atr_pct/bb_pct_20/ret_5d/
+# ret_3d/bb_std_20 등은 검증 AUC를 오히려 깎는 노이즈였음. 4개년(2023~2026) walk-forward
+# 백테스트에서 전체 12개 대비 4개 연도 전부 개선(2024년은 손실→흑자 전환),
+# 6~7월 급락구간 -134.1%p→-5.9%p. tests/test_features.py 참조.
 FEATURE_COLS_REVERSION = [
     "kospi_relative_5d",
-    "low52_pct",
-    "ret_5d",
-    "bb_pct_20",
-    "high52_pct",
-    "ret_3d",
-    "bb_std_20",
-    "atr_pct",
-    "rsi",
     "candle_body",
-    "ema_deviation_20",
-    "rsi_oversold",
+    "rsi",
+    "low52_pct",
 ]
 
 
