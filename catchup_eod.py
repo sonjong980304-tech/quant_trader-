@@ -78,10 +78,9 @@ def main():
 
     logger.info("=== EOD catch-up 시작 (%s) ===", datetime.now(KST).strftime("%Y-%m-%d %H:%M"))
 
-    _step("[1/4] EOD 평가 (청산 체크 + 보유일 +1)", runner._run_paper_evaluate_kr_eod)
-    _step("[2/4] EOD 신호 스캔 (내일 시초가 진입 예약)", runner.scan_growth_signals_eod)
-    _step("[3/4] 일일 리포트 (텔레그램)", runner.send_daily_summary)
-    _step("[4/4] 페이퍼 리포트 (텔레그램)", runner._run_paper_daily_report_kr)
+    _step("[1/3] EOD 평가 (청산 체크 + 보유일 +1)", runner._run_paper_evaluate_kr_eod)
+    _step("[2/3] EOD 신호 스캔 (내일 시초가 진입 예약)", runner.scan_growth_signals_eod)
+    _step("[3/3] 페이퍼 리포트 (텔레그램)", runner._run_paper_daily_report_kr)
 
     _mark_ran()
     logger.info("=== EOD catch-up 완료 ===")

@@ -5,7 +5,6 @@ runner.py - Reversion + Trend 슬롯분리 전략 스케줄러
   07:30   → retrain_kr_models()
   08:00   → send_morning_briefing()
   09:00   → execute_pending_orders("KR")
-  15:00   → send_daily_summary()
   15:31   → scan_growth_signals_eod() : KR EOD ML 신호 스캔 → 익일 시초가 매수
 """
 
@@ -22,7 +21,7 @@ import pytz
 import yfinance as yf
 
 from config import (
-    STOCKS, MA_SHORT, MA_LONG, RSI_PERIOD, KIS_APP_KEY,
+    STOCKS, KIS_APP_KEY,
     LIVE_TRADING,
 )
 from position_manager import (
@@ -31,10 +30,8 @@ from position_manager import (
     _init_legacy_tickers,
 )
 from data_fetcher import fetch_ohlcv, get_minute_data
-from indicators import add_all_indicators, detect_crossover
-from strategy import generate_signals, get_latest_signal
 from trader import KISTrader
-from notifier import send_telegram, build_daily_summary_message
+from notifier import send_telegram
 from morning_briefer import send_morning_briefing
 from signals.signal_graph import scan_all_graph
 from market_calendar import is_kr_trading_day
@@ -211,69 +208,6 @@ def _append_today_bar(daily_df: pd.DataFrame, minute_df) -> pd.DataFrame:
     # concat 후 중복 인덱스 제거 (yfinance가 당일 바를 이미 포함한 경우 대비)
     daily_df = daily_df[~daily_df.index.duplicated(keep="last")]
     return daily_df
-
-
-def send_daily_summary():
-    """오후 3시 현재 보유 종목 기준 일일 기술적 분석 리포트를 텔레그램으로 전송."""
-    now = datetime.now(KST)
-    if not is_kr_trading_day(now.date()):
-        return
-
-    ml_positions = _load_state().get("ml_positions", {})
-    if not ml_positions:
-        send_telegram(
-            f"📊 <b>일일 기술적 분석 리포트</b>\n"
-            f"{now.strftime('%Y-%m-%d %H:%M')} 기준\n"
-            f"현재 보유 종목 없음"
-        )
-        return
-
-    # KIS 실시간 잔고에서 실제 평균단가 조회 (entry_price 보정용)
-    kis_avg: dict = {}
-    if KIS_APP_KEY:
-        try:
-            balance = KISTrader().get_balance()
-            for h in balance:
-                if h.get("avg_price") and h.get("qty", 0) > 0:
-                    kis_avg[h["stock_code"]] = float(h["avg_price"])
-        except Exception as e:
-            logger.warning("잔고 평균단가 조회 실패: %s", e)
-
-    logger.info("일일 기술적 분석 리포트 전송 시작")
-    send_telegram(
-        f"📊 <b>일일 기술적 분석 리포트</b> (보유 {len(ml_positions)}종목)\n"
-        f"{now.strftime('%Y-%m-%d %H:%M')} 기준"
-    )
-
-    for ticker, pos_info in ml_positions.items():
-        stock_name = pos_info.get("name", ticker)
-        # KIS 실제 평균단가 우선 반영
-        code = ticker.replace(".KS", "").replace(".KQ", "")
-        if code in kis_avg:
-            pos_info = {**pos_info, "avg_price": kis_avg[code]}
-        try:
-            daily_df = fetch_ohlcv(ticker, period_years=1)
-
-            # 오늘 실시간 바 반영 (분봉 기반)
-            minute_df = None
-            try:
-                minute_df = get_minute_data(ticker, interval_min=1)
-            except Exception:
-                pass
-            daily_df = _append_today_bar(daily_df, minute_df)
-
-            daily_df = add_all_indicators(daily_df, short=MA_SHORT, long=MA_LONG, rsi_period=RSI_PERIOD)
-            daily_df = detect_crossover(daily_df, short=MA_SHORT, long=MA_LONG)
-            daily_df = generate_signals(daily_df)
-            sig      = get_latest_signal(daily_df)
-            msg      = build_daily_summary_message(
-                stock_name, sig, daily_df, position=pos_info
-            )
-            send_telegram(msg)
-        except Exception as e:
-            logger.error("  일일 리포트 실패 (%s): %s", stock_name, e)
-
-    logger.info("일일 기술적 분석 리포트 전송 완료")
 
 
 # ─────────────────────────────────────────────
@@ -1073,7 +1007,6 @@ def main():
     schedule.every().day.at("08:00").do(send_morning_briefing)
     schedule.every().day.at("09:00").do(lambda: execute_pending_orders("KR"))  # 한국장 시작
     schedule.every().day.at("09:05").do(lambda: _run_paper_entry_update("KR"))  # KR 시초가 확정
-    schedule.every().day.at("15:00").do(send_daily_summary)
     schedule.every().day.at("15:30").do(_run_paper_evaluate_kr_eod)     # KR EOD — trade_days+1 + TP/SL
     schedule.every().day.at("15:35").do(_run_paper_daily_report_kr)   # KR 마감 직후
     # [DEPRECATED 2026-06-20] US 운용 폐기 — SoT §5: 국내(KRX)만 운용
