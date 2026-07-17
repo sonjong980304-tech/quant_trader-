@@ -34,6 +34,12 @@ OPENAI_API_KEY      = os.getenv("OPENAI_API_KEY", "")
 NAVER_CLIENT_ID     = os.getenv("NAVER_CLIENT_ID", "")
 NAVER_CLIENT_SECRET = os.getenv("NAVER_CLIENT_SECRET", "")
 
+# 뉴스 브리핑 LLM 모델 (news_briefing 패키지 전용) — 실제 API 접근 가능 확인된 티어로 비용 최적화 분리
+# CHEAP(gpt-5.4-nano): 기사 선별(selector)·근거 판정(verifier.check_grounding) — 고빈도·단순 분류 작업
+# PREMIUM(gpt-5.4): closed-book 작성·재생성(writer) — 품질이 중요한 실제 문장 생성 작업
+NEWS_LLM_CHEAP      = os.getenv("NEWS_LLM_CHEAP", "gpt-5.4-nano")
+NEWS_LLM_PREMIUM    = os.getenv("NEWS_LLM_PREMIUM", "gpt-5.4")
+
 # ─────────────────────────────────────────────
 # 매매 대상 종목 (stocks.py에서 로드 — GitHub 비공개)
 # ─────────────────────────────────────────────

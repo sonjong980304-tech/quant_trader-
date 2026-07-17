@@ -51,6 +51,25 @@ def bar_compare(labels, values, title: str, y_title: str, value_fmt: str = ".2f"
     return fig
 
 
+def line_series(x, series: dict, title: str, y_title: str):
+    """
+    여러 계열의 시계열 라인차트(예: fact_score/grounding_score 추이).
+    series : {계열명: [값,...]} — x 와 길이 동일
+    """
+    fig = go.Figure()
+    palette = [GREEN, "#5c6bc0", "#ffa726", RED]
+    for i, (name, vals) in enumerate(series.items()):
+        fig.add_trace(go.Scatter(
+            x=list(x), y=list(vals),
+            mode="lines+markers",
+            name=name,
+            line=dict(color=palette[i % len(palette)], width=2),
+            marker=dict(size=5),
+        ))
+    fig.update_layout(title=title, xaxis_title="시간", yaxis_title=y_title, **_LAYOUT)
+    return fig
+
+
 def grouped_bar(labels, series: dict, title: str, y_title: str):
     """
     여러 지표를 묶은 그룹 막대(예: 평균수익률 vs 승률).

@@ -16,3 +16,4 @@ state.json
 paper_positions.json
 paper_trades.json
 !docs/*.png
+news_briefing.db*

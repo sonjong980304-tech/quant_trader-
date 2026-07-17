@@ -63,6 +63,60 @@ def send_buy_confirmation_keyboard(text: str, conf_id: str) -> bool:
         return False
 
 
+def send_feedback_keyboard(html_text: str, briefing_id: int) -> bool:
+    """뉴스 브리핑 발송 메시지를 👍/👎 피드백 인라인 키보드와 함께 전송."""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        logger.warning("텔레그램 토큰 또는 채팅 ID가 설정되지 않았습니다.")
+        return False
+
+    from news_briefing.formatter import build_feedback_keyboard_payload
+
+    url     = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id":      TELEGRAM_CHAT_ID,
+        "text":         html_text,
+        "parse_mode":   "HTML",
+        "reply_markup": json.dumps({
+            "inline_keyboard": build_feedback_keyboard_payload(briefing_id)
+        }),
+    }
+    try:
+        resp = requests.post(url, json=payload, timeout=10)
+        if resp.status_code == 200:
+            logger.info("피드백 키보드 전송 성공 (briefing_id=%s)", briefing_id)
+            return True
+        logger.error("피드백 키보드 전송 실패: %s %s", resp.status_code, resp.text)
+        return False
+    except Exception as e:
+        logger.error("피드백 키보드 전송 오류: %s", e)
+        return False
+
+
+def send_html_chunks_with_keyboard(chunks, keyboard=None) -> bool:
+    """HTML 조각 리스트를 순서대로 전송한다. keyboard(인라인 키보드 payload)가 주어지면
+    마지막 조각에만 붙인다. news_briefing.service의 send_fn(chunks, keyboard) 발송 계약에
+    맞춘 어댑터 — runner.py의 스케줄 등록에서 실제 발송 경로로 주입된다."""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        logger.warning("텔레그램 토큰 또는 채팅 ID가 설정되지 않았습니다.")
+        return False
+
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    ok = True
+    for i, chunk in enumerate(chunks):
+        payload = {"chat_id": TELEGRAM_CHAT_ID, "text": chunk, "parse_mode": "HTML"}
+        if keyboard is not None and i == len(chunks) - 1:
+            payload["reply_markup"] = json.dumps({"inline_keyboard": keyboard})
+        try:
+            resp = requests.post(url, json=payload, timeout=10)
+            if resp.status_code != 200:
+                logger.error("뉴스 브리핑 전송 실패: %s %s", resp.status_code, resp.text)
+                ok = False
+        except Exception as e:
+            logger.error("뉴스 브리핑 전송 오류: %s", e)
+            ok = False
+    return ok
+
+
 # ─────────────────────────────────────────────
 # 매수 / 매도 신호 메시지
 # ─────────────────────────────────────────────

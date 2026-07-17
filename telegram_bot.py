@@ -1035,6 +1035,28 @@ async def callback_buy_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 # ─────────────────────────────────────────────
+# 뉴스 브리핑 피드백(👍/👎) 인라인 키보드 콜백 핸들러
+# ─────────────────────────────────────────────
+async def callback_feedback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """👍 / 👎 뉴스 브리핑 피드백 버튼 처리."""
+    from news_briefing.constants import parse_callback_data
+
+    query = update.callback_query
+    data = query.data or ""
+    parsed = parse_callback_data(data)
+    if parsed is None:
+        # 다른 prefix의 콜백일 수 있음 — 예외 없이 조용히 무시
+        return
+
+    vote, briefing_id = parsed
+    from datetime import datetime
+    from news_briefing.db import record_feedback
+
+    record_feedback(briefing_id, vote, voted_at=datetime.now().isoformat())
+    await query.answer("피드백 감사합니다!")
+
+
+# ─────────────────────────────────────────────
 # 봇 실행
 # ─────────────────────────────────────────────
 def main():
@@ -1074,6 +1096,8 @@ def main():
     ))
     # EOD 매수 확인 인라인 키보드 콜백 (✅/❌)
     app.add_handler(CallbackQueryHandler(callback_buy_handler, pattern=r"^buy_"))
+    # 뉴스 브리핑 피드백 인라인 키보드 콜백 (👍/👎)
+    app.add_handler(CallbackQueryHandler(callback_feedback_handler, pattern=r"^fb_"))
     # 커맨드가 아닌 일반 텍스트 → GPT (CommandHandler보다 나중에 등록해야 함)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 

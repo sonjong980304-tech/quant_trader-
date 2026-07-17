@@ -19,6 +19,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import data_loader as dl   # noqa: E402
 import charts as ch        # noqa: E402
 import kis_live as kl      # noqa: E402
+import news_briefing.db as nb_db                       # noqa: E402
+from news_briefing.constants import DB_PATH as NB_DB_PATH  # noqa: E402
 
 st.set_page_config(page_title="Quant Trader 대시보드", page_icon="📊", layout="wide")
 
@@ -34,6 +36,11 @@ def _fmt_pct(v):
 def _fmt_won(v):
     """원화 포맷."""
     return f"{v:,.0f}원" if v is not None and pd.notna(v) else "-"
+
+
+def _fmt_score(v):
+    """신뢰 점수(0~1 등 raw 실수) 포맷(없으면 '-')."""
+    return f"{v:.3f}" if v is not None and pd.notna(v) else "-"
 
 
 def _color_signed(v):
@@ -67,7 +74,7 @@ if _start:
     st.sidebar.caption(f"페이퍼 시작일: {_start}")
 
 st.title("📊 Quant Trader 대시보드")
-tab_paper, tab_live = st.tabs(["🧪 페이퍼 트레이딩", "💰 실제 매매"])
+tab_paper, tab_live, tab_news = st.tabs(["🧪 페이퍼 트레이딩", "💰 실제 매매", "📰 뉴스 브리핑"])
 
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -308,6 +315,103 @@ with tab_live:
         )
         st.dataframe(sp, use_container_width=True, hide_index=True)
         st.caption("※ 실매매 CSV에는 에이전트/트리거 컬럼이 없어 strategy로 그룹핑합니다 (G2).")
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# 탭 C: 뉴스 브리핑
+# ═════════════════════════════════════════════════════════════════════════
+with tab_news:
+    if not os.path.exists(NB_DB_PATH):
+        st.info("아직 브리핑 데이터가 없습니다.")
+    else:
+        try:
+            nb_morning = nb_db.get_latest_briefing(kind="morning")
+            nb_evening = nb_db.get_latest_briefing(kind="evening")
+            nb_score_hist = nb_db.get_score_history(limit=90)
+            nb_forecast_hist = nb_db.get_forecast_history(limit=90)
+            nb_feedback_ratio = nb_db.get_feedback_ratio()
+            nb_hit_rate = nb_db.get_hit_rate()
+        except Exception:
+            nb_morning = nb_evening = None
+            nb_score_hist = nb_forecast_hist = []
+            nb_feedback_ratio = nb_hit_rate = None
+            st.info("아직 브리핑 데이터가 없습니다.")
+        else:
+            # ── 최신 브리핑 전문 ─────────────────────────────────────
+            st.subheader("📝 최신 브리핑 전문")
+
+            def _render_briefing(label, briefing):
+                st.markdown(f"#### {label}")
+                if briefing is None:
+                    st.info(f"{label} 이력이 없습니다.")
+                    return
+                st.caption(
+                    f"발송: {briefing.get('sent_at') or '-'}  |  "
+                    f"fact_score: {_fmt_score(briefing.get('fact_score'))}  |  "
+                    f"grounding_score: {_fmt_score(briefing.get('grounding_score'))}"
+                )
+                st.markdown(briefing.get("body_html") or "", unsafe_allow_html=True)
+
+            col_m, col_e = st.columns(2)
+            with col_m:
+                _render_briefing("🌅 아침 브리핑", nb_morning)
+            with col_e:
+                _render_briefing("🌆 저녁 브리핑", nb_evening)
+
+            st.divider()
+
+            # ── 신뢰 점수 4축 추이 ───────────────────────────────────
+            st.subheader("📈 신뢰 점수 추이")
+            if not nb_score_hist:
+                st.caption("추이를 표시할 브리핑 이력이 없습니다.")
+            else:
+                sdf = pd.DataFrame(nb_score_hist)
+                sdf["x"] = sdf["sent_at"].fillna(sdf["id"].astype(str))
+                st.plotly_chart(
+                    ch.line_series(
+                        sdf["x"],
+                        {"fact_score": sdf["fact_score"], "grounding_score": sdf["grounding_score"]},
+                        "신뢰 점수 추이 (fact_score / grounding_score)", "점수",
+                    ),
+                    use_container_width=True,
+                )
+
+            m1, m2 = st.columns(2)
+            recent_scored = [f for f in nb_forecast_hist if f.get("verdict") in ("hit", "miss")]
+            if recent_scored:
+                recent_hits = sum(1 for f in recent_scored if f["verdict"] == "hit")
+                m1.metric("최근 90건 기준 적중률", f"{recent_hits / len(recent_scored) * 100:.1f}%")
+            else:
+                m1.metric("최근 90건 기준 적중률", "채점 이력 없음")
+            m2.metric(
+                "피드백 👍 비율",
+                f"{nb_feedback_ratio * 100:.1f}%" if nb_feedback_ratio is not None else "피드백 없음",
+            )
+
+            st.divider()
+
+            # ── 전망 채점 상세 ───────────────────────────────────────
+            st.subheader("🎯 전망 채점 상세")
+            st.metric(
+                "누적 적중률",
+                f"{nb_hit_rate * 100:.1f}%" if nb_hit_rate is not None else "채점 이력 없음",
+            )
+            if not nb_forecast_hist:
+                st.info("전망 채점 이력이 없습니다.")
+            else:
+                fdf = pd.DataFrame(nb_forecast_hist)
+                _direction_ko = {"up": "상승", "flat": "보합", "down": "하락"}
+                _verdict_ko = {"hit": "적중", "miss": "실패", "pending": "대기중"}
+                fdf_view = pd.DataFrame({
+                    "시장": fdf["market"],
+                    "방향": fdf["direction"].map(_direction_ko).fillna(fdf["direction"]),
+                    "근거": fdf["rationale"],
+                    "실제등락률": fdf["actual_pct"].apply(_fmt_pct),
+                    "판정": fdf["verdict"].map(_verdict_ko).fillna(fdf["verdict"]),
+                    "채점시각": fdf["scored_at"].fillna("-"),
+                })
+                fdf_view = fdf_view.iloc[::-1]  # 최신 먼저
+                st.dataframe(fdf_view, use_container_width=True, hide_index=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────

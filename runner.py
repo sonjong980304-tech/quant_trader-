@@ -32,7 +32,8 @@ from position_manager import (
 from data_fetcher import fetch_ohlcv, get_minute_data
 from trader import KISTrader
 from notifier import send_telegram
-from morning_briefer import send_morning_briefing
+import notifier
+from news_briefing.service import run_morning, run_evening
 from signals.signal_graph import scan_all_graph
 from market_calendar import is_kr_trading_day
 
@@ -984,6 +985,20 @@ def run_monthly_rebalance():
     logger.info("run_monthly_rebalance: 폐기된 호출 (슬롯 분리 10+10 전략)")
 
 
+def _run_news_morning():
+    """08:00 뉴스 브리핑(아침). 주말·공휴일(비영업일)은 스킵."""
+    if not is_kr_trading_day(datetime.now(KST).date()):
+        return
+    run_morning(send_fn=notifier.send_html_chunks_with_keyboard)
+
+
+def _run_news_evening():
+    """15:40 뉴스 브리핑(저녁). 주말·공휴일(비영업일)은 스킵."""
+    if not is_kr_trading_day(datetime.now(KST).date()):
+        return
+    run_evening(send_fn=lambda chunks, keyboard: notifier.send_html_chunks_with_keyboard(chunks))
+
+
 def main():
     logger.info("스케줄러 시작")
 
@@ -1004,11 +1019,12 @@ def main():
 
     # 고정 스케줄
     schedule.every().day.at("07:30").do(retrain_kr_models)
-    schedule.every().day.at("08:00").do(send_morning_briefing)
+    schedule.every().day.at("08:00").do(_run_news_morning)
     schedule.every().day.at("09:00").do(lambda: execute_pending_orders("KR"))  # 한국장 시작
     schedule.every().day.at("09:05").do(lambda: _run_paper_entry_update("KR"))  # KR 시초가 확정
     schedule.every().day.at("15:30").do(_run_paper_evaluate_kr_eod)     # KR EOD — trade_days+1 + TP/SL
     schedule.every().day.at("15:35").do(_run_paper_daily_report_kr)   # KR 마감 직후
+    schedule.every().day.at("15:40").do(_run_news_evening)   # 뉴스 브리핑 저녁(마감 후)
     # [DEPRECATED 2026-06-20] US 운용 폐기 — SoT §5: 국내(KRX)만 운용
     # schedule.every().day.at("05:20").do(scan_growth_signals_eod_us)
     # schedule.every().day.at("06:20").do(scan_growth_signals_eod_us)
@@ -1037,7 +1053,8 @@ def main():
 
     logger.info(
         "등록 완료: 07:30 KR재학습(분기별 1/4/7/10월) / 08:00 모닝브리핑 / "
-        "15:30 KR EOD평가 / 15:35 KR페이퍼 / 5분 ML+페이퍼TP/SL / 매월 1일 08:30 리밸런싱"
+        "15:30 KR EOD평가 / 15:35 KR페이퍼 / 15:40 뉴스브리핑(저녁) / "
+        "5분 ML+페이퍼TP/SL / 매월 1일 08:30 리밸런싱"
     )
 
     while True:
