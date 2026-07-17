@@ -8,6 +8,7 @@ pykrx.get_market_ohlcv_by_date()로 연간 영업일 목록을 캐시해
 import logging
 from datetime import datetime, date
 import pytz
+import holidays as _holidays
 
 logger = logging.getLogger(__name__)
 KST = pytz.timezone("Asia/Seoul")
@@ -17,14 +18,25 @@ _CACHE_YEAR: int = 0
 _CACHE_DATE: "date | None" = None   # 캐시를 마지막으로 갱신한 날짜 (일 단위 재갱신용)
 
 
+def _weekday_and_holiday_check(d: date) -> bool:
+    """주말 + 한국 법정공휴일(대체공휴일 포함) 체크. pykrx 캐시가 없을 때의 폴백."""
+    if d.weekday() >= 5:
+        return False
+    try:
+        return d not in _holidays.KR(years=d.year)
+    except Exception as e:
+        logger.warning("holidays 공휴일 조회 실패 — 주말 체크로만 폴백: %s", e)
+        return True
+
+
 def is_kr_trading_day(d: date = None) -> bool:
     """
     해당 날짜가 KRX 영업일인지 확인 (일별 캐시).
     d=None이면 오늘(KST) 기준.
-    실패 시 주말 체크로 폴백.
+    실패 시 주말+공휴일 체크로 폴백.
 
     주의: pykrx OHLCV 조회는 과거 거래일만 반환한다.
-    오늘이 아직 캐시에 없으면(장 시작 전) 주말 여부로 폴백한다.
+    오늘이 아직 캐시에 없으면(장 시작 전) 주말+공휴일 여부로 폴백한다.
     """
     global _CACHE, _CACHE_YEAR, _CACHE_DATE
     if d is None:
@@ -42,12 +54,12 @@ def is_kr_trading_day(d: date = None) -> bool:
             _CACHE_DATE = today
             logger.info("KRX 영업일 캐시 갱신: %d년 %d거래일", year, len(_CACHE))
         except Exception as e:
-            logger.warning("KRX 영업일 조회 실패 — 주말 체크로 폴백: %s", e)
-            return d.weekday() < 5
+            logger.warning("KRX 영업일 조회 실패 — 주말+공휴일 체크로 폴백: %s", e)
+            return _weekday_and_holiday_check(d)
 
     # 오늘 이후(미래 포함) 날짜가 캐시에 없으면 pykrx가 미래 데이터를 반환 안 하므로
-    # 주말 체크로 폴백 (공휴일은 미반영되나 미래 날짜 스케줄링에는 충분)
+    # 주말+공휴일 체크로 폴백
     if d >= today and d not in _CACHE:
-        return d.weekday() < 5
+        return _weekday_and_holiday_check(d)
 
     return d in _CACHE

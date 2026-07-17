@@ -16,3 +16,6 @@ matplotlib
 numpy
 streamlit
 plotly
+feedparser
+finance-datareader
+holidays
