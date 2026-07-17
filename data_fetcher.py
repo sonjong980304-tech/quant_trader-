@@ -2,30 +2,47 @@
 data_fetcher.py - yfinance를 이용한 주가 데이터 수집
 """
 
+import time
 import yfinance as yf
 import pandas as pd
 from datetime import datetime, timedelta
 from config import STOCKS
 
 
-def fetch_ohlcv(ticker: str, period_years: int = 1) -> pd.DataFrame:
+def fetch_ohlcv(ticker: str, period_years: int = 1, retries: int = 2) -> pd.DataFrame:
     """
     종목 티커와 기간(년)을 받아 OHLCV 데이터프레임 반환.
     컬럼: Open, High, Low, Close, Volume
+
+    yfinance는 여러 종목을 동시에 받을 때 간헐적으로 내부 파싱 오류
+    (예: TypeError("'NoneType' object is not subscriptable"))를 내는데
+    같은 종목을 곧바로 다시 요청하면 대부분 성공하는 일시적 오류라
+    짧은 대기 후 재시도한다.
     """
     end   = datetime.today()
     start = end - timedelta(days=period_years * 365)
 
-    df = yf.download(
-        ticker,
-        start=start.strftime("%Y-%m-%d"),
-        end=end.strftime("%Y-%m-%d"),
-        auto_adjust=True,
-        progress=False,
-    )
+    df = None
+    last_err = None
+    for attempt in range(retries + 1):
+        try:
+            df = yf.download(
+                ticker,
+                start=start.strftime("%Y-%m-%d"),
+                end=end.strftime("%Y-%m-%d"),
+                auto_adjust=True,
+                progress=False,
+            )
+            if not df.empty:
+                break
+        except Exception as e:
+            last_err = e
+            df = None
+        if attempt < retries:
+            time.sleep(0.5)
 
-    if df.empty:
-        raise ValueError(f"[{ticker}] 데이터를 가져올 수 없습니다.")
+    if df is None or df.empty:
+        raise ValueError(f"[{ticker}] 데이터를 가져올 수 없습니다.") from last_err
 
     # 멀티인덱스 컬럼 평탄화 (yfinance 0.2+ 대응)
     if isinstance(df.columns, pd.MultiIndex):
