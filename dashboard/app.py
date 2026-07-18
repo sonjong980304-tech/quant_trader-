@@ -91,11 +91,20 @@ _df_paper_cur, _df_paper_past = dl.split_by_cutoff(_df_paper_all)
 def _render_paper_tab(df: pd.DataFrame, key_prefix: str):
     # ── 요약 카드 ─────────────────────────────────────────────────────
     s = dl.paper_summary(df)
+    ev = dl.paper_ev_stats(df)
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("총 신호 수", f"{s['총신호']}건")
     c2.metric("평균 승률", _fmt_pct(s["평균승률"]))
-    c3.metric("누적 수익률", _fmt_pct(s["누적수익률"]))
+    c3.metric("EV (거래당 평균 기댓값)", _fmt_pct(ev["ev"]))
     c4.metric("진행 중 포지션", f"{s['진행중']}건")
+    if ev["n"] > 0:
+        st.caption(
+            f"EV 95% 신뢰구간(부트스트랩 {ev['n']}건 기준): "
+            f"[{ev['ci_low']:.2f}%, {ev['ci_high']:.2f}%] — "
+            + ("구간이 0보다 위에 있으면 우연이 아닌 실제 엣지일 가능성이 높고, "
+               "0을 걸치면 아직 거래 수가 적어 판단하기 이릅니다."
+               if ev["ci_low"] is not None else "")
+        )
 
     if df.empty:
         st.info("페이퍼 거래 기록이 아직 없습니다.")

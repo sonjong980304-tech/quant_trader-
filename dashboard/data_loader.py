@@ -14,6 +14,7 @@ import os
 import sys
 import json
 
+import numpy as np
 import pandas as pd
 
 # ── 프로젝트 루트(= dashboard/의 부모)를 import 경로에 추가 ──────────────
@@ -163,6 +164,33 @@ def split_by_cutoff(df: pd.DataFrame, cutoff: str = STRATEGY_CUTOFF):
     current = df[ts >= cutoff_ts].reset_index(drop=True)
     past = df[ts < cutoff_ts].reset_index(drop=True)
     return current, past
+
+
+def paper_ev_stats(df: pd.DataFrame, n_boot: int = 2000, seed: int = 42) -> dict:
+    """
+    청산 거래의 기댓값(EV, 거래당 평균 net_pnl_pct)과 부트스트랩 95% 신뢰구간.
+    paper_trader.py의 get_metrics()와 동일한 방식(복원추출 2000회, seed=42)으로
+    계산해 봇의 공식 판단 지표와 일관성을 맞춘다.
+    """
+    if df.empty:
+        return {"n": 0, "ev": None, "ci_low": None, "ci_high": None}
+    closed = df[df["status"] == "closed"]
+    closed = closed[closed["net_pnl_pct"].notna()]
+    n = len(closed)
+    if n == 0:
+        return {"n": 0, "ev": None, "ci_low": None, "ci_high": None}
+
+    pnl = closed["net_pnl_pct"].to_numpy() / 100.0
+    ev = float(pnl.mean())
+    rng = np.random.default_rng(seed)
+    boot = np.array([rng.choice(pnl, size=n, replace=True).mean() for _ in range(n_boot)])
+    ci_low, ci_high = float(np.percentile(boot, 2.5)), float(np.percentile(boot, 97.5))
+    return {
+        "n": n,
+        "ev": ev * 100,
+        "ci_low": ci_low * 100,
+        "ci_high": ci_high * 100,
+    }
 
 
 def paper_equity_curve(df: pd.DataFrame) -> pd.DataFrame:
