@@ -17,3 +17,11 @@ paper_positions.json
 paper_trades.json
 !docs/*.png
 news_briefing.db*
+.catchup_last.json
+paper_meta.json
+paper_params_snapshot.json
+pending_orders.json
+.coverage
+*.bak
+*.bak_*
+*.bak-*
