@@ -211,14 +211,24 @@ def paper_ev_curve(df: pd.DataFrame) -> pd.DataFrame:
     return closed[["청산시각", "name", "ticker", "net_pnl_pct", "EV"]]
 
 
+_AGENTS = ["trend", "reversion"]
+
+
 def paper_agent_perf(df: pd.DataFrame) -> pd.DataFrame:
-    """에이전트(reversion/trend)별 성과: 평균수익률·승률·거래수."""
-    if df.empty:
-        return pd.DataFrame()
-    closed = df[df["status"] == "closed"].copy()
-    closed = closed[closed["net_pnl_pct"].notna()]
+    """
+    에이전트(trend/reversion)별 성과: 평균수익률·승률·거래수.
+    거래 기록이 아직 없는 에이전트(예: trend 슬롯 미체결)도 0으로 채워
+    항상 두 에이전트가 함께 표시되게 한다.
+    """
+    base = pd.DataFrame({"에이전트": _AGENTS})
+    closed = df[df["status"] == "closed"].copy() if not df.empty else df
+    closed = closed[closed["net_pnl_pct"].notna()] if not closed.empty else closed
     if closed.empty:
-        return pd.DataFrame()
+        base["평균수익률"] = 0.0
+        base["거래수"] = 0
+        base["승률"] = None
+        return base
+
     g = closed.groupby("agent").agg(
         평균수익률=("net_pnl_pct", "mean"),
         거래수=("signal_id", "count"),
@@ -231,6 +241,9 @@ def paper_agent_perf(df: pd.DataFrame) -> pd.DataFrame:
         .reset_index(name="승률")
     )
     g = g.merge(wr, on="agent", how="left").rename(columns={"agent": "에이전트"})
+    g = base.merge(g, on="에이전트", how="left")
+    g["평균수익률"] = g["평균수익률"].fillna(0.0)
+    g["거래수"] = g["거래수"].fillna(0).astype(int)
     return g
 
 

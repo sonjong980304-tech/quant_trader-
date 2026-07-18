@@ -202,25 +202,18 @@ def _render_paper_tab(df: pd.DataFrame, key_prefix: str):
         col_a, col_b = st.columns(2)
         with col_a:
             st.subheader("🤖 에이전트별 성과")
+            # trend는 아직 청산 거래가 없어도 0으로 채워 항상 표시(paper_agent_perf 내부 처리)
             ap = dl.paper_agent_perf(df)
-            if ap.empty:
-                st.caption("청산 거래 없음")
-            else:
-                # 평균수익률(손익 부호 있음)과 승률(0~100% 크기 지표)은 스케일이 달라
-                # 한 차트에 묶지 않고 분리 — 색도 각자 의미에 맞게(손익=초록/빨강, 승률=중립색).
-                st.plotly_chart(
-                    ch.bar_compare(ap["에이전트"], ap["평균수익률"],
-                                   "에이전트별 평균수익률", "평균수익률 (%)"),
-                    use_container_width=True,
-                    key=f"{key_prefix}_agent_perf_chart",
-                )
-                st.plotly_chart(
-                    ch.bar_single(ap["에이전트"], ap["승률"].fillna(0),
-                                  "에이전트별 승률", "승률 (%)"),
-                    use_container_width=True,
-                    key=f"{key_prefix}_agent_winrate_chart",
-                )
-                st.dataframe(ap, use_container_width=True, hide_index=True, key=f"{key_prefix}_agent_perf_table")
+            st.plotly_chart(
+                ch.grouped_bar(
+                    ap["에이전트"],
+                    {"수익률(%)": ap["평균수익률"], "승률(%)": ap["승률"].fillna(0)},
+                    "에이전트별 수익률 · 승률", "값",
+                ),
+                use_container_width=True,
+                key=f"{key_prefix}_agent_perf_chart",
+            )
+            st.dataframe(ap, use_container_width=True, hide_index=True, key=f"{key_prefix}_agent_perf_table")
         with col_b:
             st.subheader("🎯 트리거별 성과")
             tp = dl.paper_trigger_perf(df)

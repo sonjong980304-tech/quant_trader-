@@ -15,6 +15,8 @@ _LAYOUT = dict(
     template="plotly_white",
     height=360,
     margin=dict(l=10, r=10, t=46, b=10),
+    bargap=0.35,       # 막대 사이 간격 — 없으면 막대가 두껍고 뭉툭해 보임
+    bargroupgap=0.15,  # 그룹 막대 안에서 계열끼리의 간격
 )
 
 
@@ -66,24 +68,6 @@ def bar_compare(labels, values, title: str, y_title: str, value_fmt: str = ".2f"
     return fig
 
 
-def bar_single(labels, values, title: str, y_title: str, value_fmt: str = ".1f",
-                color: str = NEUTRAL):
-    """
-    부호 없는 크기 지표용 단색 막대차트(예: 승률, 거래수, AUC).
-    이익/손실 색(GREEN/RED)과 섞이지 않도록 항상 NEUTRAL 계열 단색만 사용.
-    """
-    labels = list(labels)
-    values = [float(v) if v is not None else 0.0 for v in values]
-    fig = go.Figure(go.Bar(
-        x=labels, y=values,
-        marker_color=color,
-        text=[format(v, value_fmt) for v in values],
-        textposition="auto",
-    ))
-    fig.update_layout(title=title, xaxis_title="", yaxis_title=y_title, **_LAYOUT)
-    return fig
-
-
 def line_series(x, series: dict, title: str, y_title: str):
     """
     여러 계열의 시계열 라인차트(예: fact_score/grounding_score 추이).
@@ -107,9 +91,11 @@ def grouped_bar(labels, series: dict, title: str, y_title: str):
     """
     여러 지표를 묶은 그룹 막대(예: 평균수익률 vs 승률).
     series : {계열명: [값,...]} — labels 와 길이 동일
+    색은 계열 구분용(범주형)이라 GREEN/RED(다른 차트의 손익 부호 색)와
+    헷갈리지 않도록 의도적으로 배제한 팔레트를 쓴다.
     """
     fig = go.Figure()
-    palette = [GREEN, "#5c6bc0", "#ffa726", RED]
+    palette = [NEUTRAL, "#ffa726", "#8d6e63", "#26c6da"]
     for i, (name, vals) in enumerate(series.items()):
         fig.add_trace(go.Bar(
             x=list(labels), y=list(vals), name=name,
