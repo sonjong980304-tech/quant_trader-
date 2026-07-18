@@ -247,23 +247,38 @@ def paper_agent_perf(df: pd.DataFrame) -> pd.DataFrame:
     return g
 
 
+_TRIGGERS = ["거래량폭발", "BB하단반등", "RSI과매도탈출", "이격도저점", "BB스퀴즈돌파"]
+
+
 def paper_trigger_perf(df: pd.DataFrame) -> pd.DataFrame:
-    """트리거(5종)별 평균수익률·거래수 (trigger_types explode)."""
-    if df.empty:
-        return pd.DataFrame()
-    closed = df[df["status"] == "closed"].copy()
-    closed = closed[closed["net_pnl_pct"].notna()]
+    """
+    트리거(reversion 5종 고정 + 실데이터에만 있는 그 외, 예: trend_entry)별
+    평균수익률·거래수. 아직 한 번도 안 나온 트리거도 0으로 채워 항상 표시.
+    """
+    base = pd.DataFrame({"트리거": _TRIGGERS})
+    closed = df[df["status"] == "closed"].copy() if not df.empty else df
+    closed = closed[closed["net_pnl_pct"].notna()] if not closed.empty else closed
     if closed.empty or "trigger_types" not in closed.columns:
-        return pd.DataFrame()
+        base["평균수익률"] = 0.0
+        base["거래수"] = 0
+        return base
+
     ex = closed.explode("trigger_types")
     ex = ex[ex["trigger_types"].notna() & (ex["trigger_types"] != "")]
     if ex.empty:
-        return pd.DataFrame()
+        base["평균수익률"] = 0.0
+        base["거래수"] = 0
+        return base
+
     g = ex.groupby("trigger_types").agg(
         평균수익률=("net_pnl_pct", "mean"),
         거래수=("signal_id", "count"),
     ).reset_index().rename(columns={"trigger_types": "트리거"})
-    return g
+    extra = g[~g["트리거"].isin(_TRIGGERS)]
+    g = base.merge(g, on="트리거", how="left")
+    g["평균수익률"] = g["평균수익률"].fillna(0.0)
+    g["거래수"] = g["거래수"].fillna(0).astype(int)
+    return pd.concat([g, extra], ignore_index=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────

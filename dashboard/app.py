@@ -216,17 +216,15 @@ def _render_paper_tab(df: pd.DataFrame, key_prefix: str):
             st.dataframe(ap, use_container_width=True, hide_index=True, key=f"{key_prefix}_agent_perf_table")
         with col_b:
             st.subheader("🎯 트리거별 성과")
+            # 아직 한 번도 안 나온 트리거도 0으로 채워 항상 표시(paper_trigger_perf 내부 처리)
             tp = dl.paper_trigger_perf(df)
-            if tp.empty:
-                st.caption("청산 거래 없음")
-            else:
-                st.plotly_chart(
-                    ch.bar_compare(tp["트리거"], tp["평균수익률"],
-                                   "트리거별 평균수익률", "평균수익률 (%)"),
-                    use_container_width=True,
-                    key=f"{key_prefix}_trigger_perf_chart",
-                )
-                st.dataframe(tp, use_container_width=True, hide_index=True, key=f"{key_prefix}_trigger_perf_table")
+            st.plotly_chart(
+                ch.bar_compare(tp["트리거"], tp["평균수익률"],
+                               "트리거별 평균수익률", "평균수익률 (%)"),
+                use_container_width=True,
+                key=f"{key_prefix}_trigger_perf_chart",
+            )
+            st.dataframe(tp, use_container_width=True, hide_index=True, key=f"{key_prefix}_trigger_perf_table")
 
 
 # ── 탭 렌더링 ────────────────────────────────────────────────────────────
