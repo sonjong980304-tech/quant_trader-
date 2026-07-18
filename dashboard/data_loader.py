@@ -193,8 +193,12 @@ def paper_ev_stats(df: pd.DataFrame, n_boot: int = 2000, seed: int = 42) -> dict
     }
 
 
-def paper_equity_curve(df: pd.DataFrame) -> pd.DataFrame:
-    """청산 거래를 청산시각 순으로 정렬해 누적수익률(%) 곡선 산출."""
+def paper_ev_curve(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    청산 거래를 청산시각 순으로 정렬해 러닝 EV(그 시점까지의 누적 평균 net_pnl_pct)
+    곡선 산출. 단순 합산(cumsum)이 아니라 거래당 평균이라 paper_ev_stats()의
+    최종 EV와 같은 단위 — 거래가 늘어날수록 EV가 어느 값으로 수렴하는지 보여준다.
+    """
     if df.empty:
         return pd.DataFrame()
     closed = df[df["status"] == "closed"].copy()
@@ -203,8 +207,8 @@ def paper_equity_curve(df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
     closed["청산시각"] = pd.to_datetime(closed["exit_timestamp"], errors="coerce")
     closed = closed.sort_values("청산시각")
-    closed["누적수익률"] = closed["net_pnl_pct"].cumsum()
-    return closed[["청산시각", "name", "ticker", "net_pnl_pct", "누적수익률"]]
+    closed["EV"] = closed["net_pnl_pct"].expanding().mean()
+    return closed[["청산시각", "name", "ticker", "net_pnl_pct", "EV"]]
 
 
 def paper_agent_perf(df: pd.DataFrame) -> pd.DataFrame:

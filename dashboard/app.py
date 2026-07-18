@@ -186,14 +186,14 @@ def _render_paper_tab(df: pd.DataFrame, key_prefix: str):
 
         st.divider()
 
-        # ── 누적수익 곡선 ─────────────────────────────────────────────
-        eq = dl.paper_equity_curve(df)
-        st.subheader("📈 누적 수익 곡선 (청산 기준)")
+        # ── EV(러닝 평균) 곡선 ────────────────────────────────────────
+        eq = dl.paper_ev_curve(df)
+        st.subheader("📈 EV 추이 (청산 기준, 거래당 누적 평균)")
         if eq.empty:
             st.caption("청산된 거래가 아직 없어 곡선을 표시할 수 없습니다.")
         else:
             st.plotly_chart(
-                ch.equity_curve(eq["청산시각"], eq["누적수익률"], "페이퍼 누적 수익률"),
+                ch.equity_curve(eq["청산시각"], eq["EV"], "페이퍼 EV 추이", y_title="EV (%, 거래당 평균)"),
                 use_container_width=True,
                 key=f"{key_prefix}_equity_curve",
             )
@@ -206,14 +206,19 @@ def _render_paper_tab(df: pd.DataFrame, key_prefix: str):
             if ap.empty:
                 st.caption("청산 거래 없음")
             else:
+                # 평균수익률(손익 부호 있음)과 승률(0~100% 크기 지표)은 스케일이 달라
+                # 한 차트에 묶지 않고 분리 — 색도 각자 의미에 맞게(손익=초록/빨강, 승률=중립색).
                 st.plotly_chart(
-                    ch.grouped_bar(
-                        ap["에이전트"],
-                        {"평균수익률(%)": ap["평균수익률"], "승률(%)": ap["승률"].fillna(0)},
-                        "에이전트별 평균수익률 · 승률", "값",
-                    ),
+                    ch.bar_compare(ap["에이전트"], ap["평균수익률"],
+                                   "에이전트별 평균수익률", "평균수익률 (%)"),
                     use_container_width=True,
                     key=f"{key_prefix}_agent_perf_chart",
+                )
+                st.plotly_chart(
+                    ch.bar_single(ap["에이전트"], ap["승률"].fillna(0),
+                                  "에이전트별 승률", "승률 (%)"),
+                    use_container_width=True,
+                    key=f"{key_prefix}_agent_winrate_chart",
                 )
                 st.dataframe(ap, use_container_width=True, hide_index=True, key=f"{key_prefix}_agent_perf_table")
         with col_b:
