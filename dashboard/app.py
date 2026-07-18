@@ -19,7 +19,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import data_loader as dl   # noqa: E402
 import charts as ch        # noqa: E402
 import kis_live as kl      # noqa: E402
-import benchmark as bm     # noqa: E402
 import news_briefing.db as nb_db                       # noqa: E402
 from news_briefing.constants import DB_PATH as NB_DB_PATH  # noqa: E402
 
@@ -178,50 +177,17 @@ def _render_paper_tab(df: pd.DataFrame, key_prefix: str):
 
         st.divider()
 
-        # ── 누적수익 곡선 (전략 vs 시장 벤치마크) ────────────────────
+        # ── 누적수익 곡선 ─────────────────────────────────────────────
         eq = dl.paper_equity_curve(df)
         st.subheader("📈 누적 수익 곡선 (청산 기준)")
         if eq.empty:
             st.caption("청산된 거래가 아직 없어 곡선을 표시할 수 없습니다.")
         else:
-            _bstart = eq["청산시각"].min()
-            _bend = eq["청산시각"].max()
-            bench = bm.get_benchmark_curve(
-                _bstart.strftime("%Y-%m-%d"),
-                (_bend + pd.Timedelta(days=1)).strftime("%Y-%m-%d"),
+            st.plotly_chart(
+                ch.equity_curve(eq["청산시각"], eq["누적수익률"], "페이퍼 누적 수익률"),
+                use_container_width=True,
+                key=f"{key_prefix}_equity_curve",
             )
-            if bench.empty:
-                st.caption("⚠️ 시장 벤치마크(코스피+코스닥) 데이터를 가져오지 못해 전략 곡선만 표시합니다.")
-                st.plotly_chart(
-                    ch.equity_curve(eq["청산시각"], eq["누적수익률"], "페이퍼 누적 수익률"),
-                    use_container_width=True,
-                    key=f"{key_prefix}_equity_curve",
-                )
-            else:
-                bench_total = float(bench["벤치마크누적수익률"].iloc[-1])
-                strat_total = float(eq["누적수익률"].iloc[-1])
-                w = bm.get_market_cap_weights() or {}
-                mcol1, mcol2 = st.columns(2)
-                mcol1.metric("시장 벤치마크 수익률 (같은 기간)", _fmt_pct(bench_total))
-                mcol2.metric("전략 누적수익률 − 벤치마크", _fmt_pct(strat_total - bench_total))
-                if w:
-                    st.caption(
-                        f"벤치마크 = 코스피(^KS11) {w['KOSPI']*100:.1f}% + "
-                        f"코스닥(^KQ11) {w['KOSDAQ']*100:.1f}% 시가총액 가중 "
-                        f"(FinanceDataReader 최신 상장 시가총액 기준 고정 가중치). "
-                        "⚠️ 전략 누적수익률은 동시 최대 10~20개 슬롯의 개별 거래 수익률(%)을 "
-                        "단순 합산한 값이라 단일 포트폴리오 가격변화율인 벤치마크와 계산 단위가 다릅니다 — "
-                        "위 차이는 정확한 알파(초과수익)가 아니라 방향성 참고용입니다."
-                    )
-                st.plotly_chart(
-                    ch.equity_vs_benchmark(
-                        eq["청산시각"], eq["누적수익률"], "전략(청산 기준)",
-                        bench["날짜"], bench["벤치마크누적수익률"], "시장 벤치마크",
-                        "페이퍼 누적 수익률 vs 시장 벤치마크",
-                    ),
-                    use_container_width=True,
-                    key=f"{key_prefix}_equity_curve",
-                )
 
         # ── 에이전트별 / 트리거별 성과 ────────────────────────────────
         col_a, col_b = st.columns(2)

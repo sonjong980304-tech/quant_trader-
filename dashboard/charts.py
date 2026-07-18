@@ -33,28 +33,6 @@ def equity_curve(x, y, title: str, y_title: str = "누적수익률 (%)"):
     return fig
 
 
-def equity_vs_benchmark(strat_x, strat_y, strat_name, bench_x, bench_y, bench_name,
-                         title: str, y_title: str = "누적수익률 (%)"):
-    """전략 누적수익률(청산 이벤트 기준) vs 시장 벤치마크(일별) 오버레이."""
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=list(strat_x), y=list(strat_y),
-        mode="lines+markers",
-        line=dict(color=GREEN, width=2),
-        marker=dict(size=6),
-        name=strat_name,
-    ))
-    fig.add_trace(go.Scatter(
-        x=list(bench_x), y=list(bench_y),
-        mode="lines",
-        line=dict(color="#9e9e9e", width=2, dash="dot"),
-        name=bench_name,
-    ))
-    fig.add_hline(y=0, line_dash="dash", line_color="gray")
-    fig.update_layout(title=title, xaxis_title="시간", yaxis_title=y_title, **_LAYOUT)
-    return fig
-
-
 def bar_compare(labels, values, title: str, y_title: str, value_fmt: str = ".2f"):
     """
     그룹 막대차트. 값 부호에 따라 색상 자동(양수 초록 / 음수 빨강).
