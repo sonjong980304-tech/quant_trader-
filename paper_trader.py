@@ -40,7 +40,7 @@ from backtest_walkforward import _apply_costs as _bt_apply_costs
 from config import (
     PAPER_BACKTEST_EV_KR as PAPER_BACKTEST_EV,
     TP_PCT, SL_PCT, EOD_SLIPPAGE_PCT, EOD_HORIZON,
-    REV_SLOTS, TR_SLOTS,
+    REV_SLOTS, TR_SLOTS, SPLIT_GUARD_PCT,
 )
 PAPER_BACKTEST_EV_US = None  # US 미운용
 
@@ -93,6 +93,13 @@ def _save(path: str, obj: Any):
 
 def _is_kr(ticker: str) -> bool:
     return ticker.endswith(".KS") or ticker.endswith(".KQ")
+
+
+def _is_price_anomaly(cur_price: float, entry_price: float, threshold: float = SPLIT_GUARD_PCT) -> bool:
+    """진입가 대비 현재가가 임계값 이상 벌어지면 액면분할/데이터 이상으로 간주."""
+    if not cur_price or not entry_price:
+        return False
+    return abs(cur_price - entry_price) / entry_price >= threshold
 
 
 def _now_kst() -> str:
@@ -258,6 +265,26 @@ def evaluate_positions(price_map: dict[str, float], trade_day: bool = True,
         entry = pos.get("entry_price")
         if entry is None:
             continue  # 시초가 미확정 — trade_days 증가 없음, update_entry_prices() 대기
+
+        # 진입가 대비 비정상 급변(액면분할/데이터 이상 의심) — 자동청산 보류하고 사람 확인 대기
+        if _is_price_anomaly(cur, entry):
+            if not pos.get("anomaly_flagged"):
+                pos["anomaly_flagged"] = True
+                positions[sig_id] = pos
+                _save(POS_PATH, positions)
+                change_pct = (cur - entry) / entry * 100
+                logger.warning("[Paper][%s] 비정상 가격 변동 감지(%+.1f%%) — 액면분할/데이터 이상 의심, 자동청산 보류",
+                               ticker, change_pct)
+                try:
+                    from notifier import send_telegram
+                    send_telegram(
+                        f"⚠️ <b>[페이퍼] {pos['name']}({ticker})</b>\n"
+                        f"진입가 대비 {change_pct:+.1f}% — 액면분할/데이터 오류 의심\n"
+                        f"자동 청산을 보류합니다. paper_positions.json에서 entry_price를 확인해주세요."
+                    )
+                except Exception:
+                    pass
+            continue
 
         if trade_day:
             pos["trade_days"] += 1

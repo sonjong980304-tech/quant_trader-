@@ -174,6 +174,48 @@ class TestEvaluatePositions:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 액면분할/데이터 이상 방어 — 진입가 대비 ±30% 이상 급변 시 자동청산 보류
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestAnomalyGuard:
+    ENTRY = 80000.0
+
+    def _setup(self):
+        _signal(entry=self.ENTRY)
+
+    def test_large_drop_does_not_close_position(self):
+        """진입가 대비 -30% 이상 급락 시 SL로 자동청산하지 않는다."""
+        self._setup()
+        closed = pt.evaluate_positions({"005930.KS": self.ENTRY * 0.2})  # -80%
+        assert closed == []
+        positions = pt._load(pt.POS_PATH, {})
+        assert len(positions) == 1
+
+    def test_large_drop_flags_position_and_alerts_once(self, monkeypatch):
+        """이상 감지 시 포지션에 플래그를 남기고 텔레그램 알림을 보낸다."""
+        import notifier
+        alerts = []
+        monkeypatch.setattr(notifier, "send_telegram", lambda msg: alerts.append(msg))
+        self._setup()
+        pt.evaluate_positions({"005930.KS": self.ENTRY * 0.2})
+        pos = list(pt._load(pt.POS_PATH, {}).values())[0]
+        assert pos.get("anomaly_flagged") is True
+        assert len(alerts) == 1
+
+    def test_alert_not_resent_on_repeated_checks(self, monkeypatch):
+        """같은 이상 상태가 반복돼도 알림을 매번 다시 보내지 않고, 포지션은 계속 동결된다."""
+        import notifier
+        alerts = []
+        monkeypatch.setattr(notifier, "send_telegram", lambda msg: alerts.append(msg))
+        self._setup()
+        pt.evaluate_positions({"005930.KS": self.ENTRY * 0.2})
+        pt.evaluate_positions({"005930.KS": self.ENTRY * 0.2})
+        positions = pt._load(pt.POS_PATH, {})
+        assert len(positions) == 1
+        assert len(alerts) == 1
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # V2-2: 진입가 가정 + 슬리피지 양방향 확인
 # ─────────────────────────────────────────────────────────────────────────────
 

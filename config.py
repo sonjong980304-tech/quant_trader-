@@ -133,6 +133,7 @@ PAPER_BACKTEST_EV_US = None      # US 미운용
 # reversion 에이전트 전용 파라미터
 TP_PCT               = 0.15      # reversion 익절 +15%
 SL_PCT               = 0.08      # reversion 손절 -8%
+SPLIT_GUARD_PCT      = 0.30      # 진입가 대비 ±30% 이상 급변 시 액면분할/데이터 이상으로 간주 — 자동매매 보류
 EOD_SLIPPAGE_PCT     = 0.0005    # 0.05% 슬리피지
 EOD_HORIZON          = 10        # reversion 보유기간 (거래일)
 # trend 에이전트: TP 없음, trailing stop 2.0×ATR + MA20 이탈 청산

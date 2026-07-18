@@ -7,7 +7,7 @@ import os
 import sys
 import types
 import pytest
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -36,9 +36,17 @@ import position_manager as pm
 
 # ─── fixtures ──────────────────────────────────────────────────────────────
 
+class _FixedWeekdayDatetime(datetime):
+    """check_ml_positions()의 주말 게이트가 실행 요일에 좌우되지 않도록 평일(월요일)로 고정."""
+    @classmethod
+    def now(cls, tz=None):
+        return datetime(2026, 1, 5, 10, 0, tzinfo=tz)  # 2026-01-05, 월요일
+
+
 @pytest.fixture(autouse=True)
 def isolated_state(tmp_path, monkeypatch):
     monkeypatch.setattr(pm, "_STATE_FILE", str(tmp_path / "state.json"))
+    monkeypatch.setattr(pm, "datetime", _FixedWeekdayDatetime)
     yield
 
 
@@ -109,6 +117,22 @@ class TestSaveMlPosition:
         pm.save_ml_position("D.KS", "종목D", qty=1, entry_price=50000.0, avg_win=0.12)
         pos = pm._load_state()["ml_positions"]["D.KS"]
         assert pos["highest_price"] == pos["entry_price"]
+
+
+# ─── _is_price_anomaly (액면분할/데이터 이상 감지) ──────────────────────────
+
+class TestIsPriceAnomaly:
+    def test_large_drop_is_anomaly(self):
+        """진입가 대비 -30% 이상 급락 — 액면분할 의심."""
+        assert pm._is_price_anomaly(cur_price=2000.0, entry_price=10000.0) is True
+
+    def test_large_spike_is_anomaly(self):
+        """진입가 대비 +30% 이상 급등 — 액면분할(역분할) 의심."""
+        assert pm._is_price_anomaly(cur_price=15000.0, entry_price=10000.0) is True
+
+    def test_normal_move_is_not_anomaly(self):
+        """정상적인 손절/익절 범위 내 변동은 이상으로 판정하지 않는다."""
+        assert pm._is_price_anomaly(cur_price=8500.0, entry_price=10000.0) is False
 
 
 # ─── _trading_days_elapsed ─────────────────────────────────────────────────
@@ -184,6 +208,45 @@ class TestCheckMlPositions:
         pos = pm._load_state().get("ml_positions", {}).get("U.KS")
         assert pos is not None
         assert pos["highest_price"] == pytest.approx(10800.0, rel=1e-4)
+
+
+# ─── 액면분할/데이터 이상 방어 ───────────────────────────────────────────────
+
+class TestAnomalyGuard:
+    def test_large_drop_freezes_position_no_sell(self, monkeypatch):
+        """진입가 대비 -30% 이상 급락 시 자동 손절하지 않고 포지션을 동결한다."""
+        monkeypatch.setattr(pm, "_get_current_price", lambda t: 2000.0)  # entry=10000 → -80%
+        monkeypatch.setattr(pm, "_trading_days_elapsed", lambda d: 0)
+        monkeypatch.setattr(pm, "_is_market_open", lambda is_us: True)
+        pm._save_state({"ml_positions": {"X.KS": _make_pos("X.KS")}})
+        pm.check_ml_positions()
+        assert "X.KS" in pm._load_state().get("ml_positions", {})
+
+    def test_large_drop_flags_position_and_alerts_once(self, monkeypatch):
+        """이상 감지 시 포지션에 플래그를 남기고 텔레그램 알림을 보낸다."""
+        alerts = []
+        monkeypatch.setattr(pm, "_get_current_price", lambda t: 2000.0)
+        monkeypatch.setattr(pm, "_trading_days_elapsed", lambda d: 0)
+        monkeypatch.setattr(pm, "_is_market_open", lambda is_us: True)
+        monkeypatch.setattr(pm, "send_telegram", lambda msg: alerts.append(msg))
+        pm._save_state({"ml_positions": {"Y.KS": _make_pos("Y.KS")}})
+        pm.check_ml_positions()
+        pos = pm._load_state()["ml_positions"]["Y.KS"]
+        assert pos.get("anomaly_flagged") is True
+        assert len(alerts) == 1
+
+    def test_alert_not_resent_on_repeated_checks(self, monkeypatch):
+        """같은 이상 상태가 반복돼도 알림을 매번 다시 보내지 않는다(스팸 방지)."""
+        alerts = []
+        monkeypatch.setattr(pm, "_get_current_price", lambda t: 2000.0)
+        monkeypatch.setattr(pm, "_trading_days_elapsed", lambda d: 0)
+        monkeypatch.setattr(pm, "_is_market_open", lambda is_us: True)
+        monkeypatch.setattr(pm, "send_telegram", lambda msg: alerts.append(msg))
+        pm._save_state({"ml_positions": {"Z.KS": _make_pos("Z.KS")}})
+        pm.check_ml_positions()
+        pm.check_ml_positions()
+        assert "Z.KS" in pm._load_state().get("ml_positions", {})  # 동결이 유지돼야 함
+        assert len(alerts) == 1
 
 
 # ─── 장외 보호 회귀 테스트 ──────────────────────────────────────────────────────

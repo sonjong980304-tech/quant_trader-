@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 import yfinance as yf
 import pytz
 
-from config import KIS_APP_KEY, LIVE_TRADING, SL_PCT
+from config import KIS_APP_KEY, LIVE_TRADING, SL_PCT, SPLIT_GUARD_PCT
 from trader import KISTrader
 from notifier import send_telegram
 from market_calendar import is_kr_trading_day
@@ -177,6 +177,13 @@ def _get_current_price(ticker: str):
         return None
 
 
+def _is_price_anomaly(cur_price: float, entry_price: float, threshold: float = SPLIT_GUARD_PCT) -> bool:
+    """진입가 대비 현재가가 임계값 이상 벌어지면 액면분할/데이터 이상으로 간주."""
+    if not cur_price or not entry_price:
+        return False
+    return abs(cur_price - entry_price) / entry_price >= threshold
+
+
 def _trading_days_elapsed(entry_date_str: str) -> int:
     """입력 날짜부터 오늘까지 KRX 거래일(공휴일 포함) 수."""
     from datetime import date as date_cls
@@ -229,6 +236,23 @@ def check_ml_positions():
             name      = pos.get("name", ticker)
             target    = pos["target_price"]
             stop      = pos.get("stop_price", pos["entry_price"] * 0.93)
+
+            # 진입가 대비 비정상 급변(액면분할/데이터 이상 의심) — 자동매매 보류하고 사람 확인 대기
+            if cur_price and _is_price_anomaly(cur_price, pos["entry_price"]):
+                if not pos.get("anomaly_flagged"):
+                    pos["anomaly_flagged"] = True
+                    state["ml_positions"][ticker] = pos
+                    _save_state(state)
+                    change_pct = (cur_price - pos["entry_price"]) / pos["entry_price"] * 100
+                    logger.warning("[%s] 비정상 가격 변동 감지(%+.1f%%) — 액면분할/데이터 이상 의심, 자동매매 보류",
+                                   ticker, change_pct)
+                    send_telegram(
+                        f"⚠️ <b>{name} ({ticker})</b>\n"
+                        f"진입가 대비 {change_pct:+.1f}% — 액면분할/데이터 오류 의심\n"
+                        f"자동 손절/익절을 보류합니다. state.json의 ml_positions.{ticker} 항목을 확인 후 "
+                        f"entry_price/target_price/stop_price를 수동으로 조정해주세요."
+                    )
+                continue
 
             if cur_price and cur_price > pos.get("highest_price", pos["entry_price"]):
                 pos["highest_price"] = round(cur_price, 4)
