@@ -148,6 +148,23 @@ def paper_summary(df: pd.DataFrame) -> dict:
     }
 
 
+STRATEGY_CUTOFF = "2026-07-09 00:01:29"  # reversion 피처 12→4 축소(커밋 b4d75bf) 시점
+
+
+def split_by_cutoff(df: pd.DataFrame, cutoff: str = STRATEGY_CUTOFF):
+    """timestamp 기준 (현재 전략 df, 과거 전략 df) 튜플로 분리.
+
+    cutoff 이후 = 현재 운용 전략(reversion 4피처), 이전 = 구버전(12피처) 참고용 기록.
+    """
+    if df.empty:
+        return df, df
+    ts = pd.to_datetime(df["timestamp"], errors="coerce")
+    cutoff_ts = pd.to_datetime(cutoff)
+    current = df[ts >= cutoff_ts].reset_index(drop=True)
+    past = df[ts < cutoff_ts].reset_index(drop=True)
+    return current, past
+
+
 def paper_equity_curve(df: pd.DataFrame) -> pd.DataFrame:
     """청산 거래를 청산시각 순으로 정렬해 누적수익률(%) 곡선 산출."""
     if df.empty:

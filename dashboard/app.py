@@ -72,17 +72,23 @@ st.sidebar.caption(
 _start = dl.get_paper_start_date()
 if _start:
     st.sidebar.caption(f"페이퍼 시작일: {_start}")
+st.sidebar.caption(
+    f"현재 전략 기준일: {dl.STRATEGY_CUTOFF[:10]} 이후 (reversion 피처 12→4 축소)"
+)
 
 st.title("📊 Quant Trader 대시보드")
-tab_paper, tab_live, tab_news = st.tabs(["🧪 페이퍼 트레이딩", "💰 실제 매매", "📰 뉴스 브리핑"])
+tab_paper, tab_paper_past, tab_live, tab_news = st.tabs(
+    ["🧪 페이퍼 트레이딩", "📜 과거 전략", "💰 실제 매매", "📰 뉴스 브리핑"]
+)
+
+_df_paper_all = dl.load_paper_trades()
+_df_paper_cur, _df_paper_past = dl.split_by_cutoff(_df_paper_all)
 
 
 # ═════════════════════════════════════════════════════════════════════════
-# 탭 A: 페이퍼 트레이딩
+# 탭 A: 페이퍼 트레이딩 (현재 전략 / 과거 전략 공용 렌더러)
 # ═════════════════════════════════════════════════════════════════════════
-with tab_paper:
-    df = dl.load_paper_trades()
-
+def _render_paper_tab(df: pd.DataFrame, key_prefix: str):
     # ── 요약 카드 ─────────────────────────────────────────────────────
     s = dl.paper_summary(df)
     c1, c2, c3, c4 = st.columns(4)
@@ -135,11 +141,16 @@ with tab_paper:
         # 필터/정렬
         f1, f2, f3 = st.columns([2, 2, 2])
         agents = sorted(df["agent"].dropna().unique().tolist())
-        sel_agent = f1.multiselect("에이전트 필터", agents, default=agents)
+        sel_agent = f1.multiselect(
+            "에이전트 필터", agents, default=agents, key=f"{key_prefix}_agent_filter"
+        )
         statuses = sorted(df["status"].dropna().unique().tolist())
-        sel_status = f2.multiselect("상태 필터", statuses, default=statuses)
+        sel_status = f2.multiselect(
+            "상태 필터", statuses, default=statuses, key=f"{key_prefix}_status_filter"
+        )
         sort_key = f3.selectbox(
-            "정렬", ["진입일(최신)", "향후수익률(높은순)", "win_prob(높은순)", "RR(높은순)"]
+            "정렬", ["진입일(최신)", "향후수익률(높은순)", "win_prob(높은순)", "RR(높은순)"],
+            key=f"{key_prefix}_sort",
         )
 
         mask = view["에이전트"].isin(sel_agent) & view["상태"].isin(sel_status)
@@ -162,7 +173,7 @@ with tab_paper:
             vshow = vshow.sort_values("진입일", ascending=False)
 
         styled = vshow.style.applymap(_color_signed, subset=["향후수익률"])
-        st.dataframe(styled, use_container_width=True, hide_index=True)
+        st.dataframe(styled, use_container_width=True, hide_index=True, key=f"{key_prefix}_signal_table")
 
         st.divider()
 
@@ -175,6 +186,7 @@ with tab_paper:
             st.plotly_chart(
                 ch.equity_curve(eq["청산시각"], eq["누적수익률"], "페이퍼 누적 수익률"),
                 use_container_width=True,
+                key=f"{key_prefix}_equity_curve",
             )
 
         # ── 에이전트별 / 트리거별 성과 ────────────────────────────────
@@ -192,8 +204,9 @@ with tab_paper:
                         "에이전트별 평균수익률 · 승률", "값",
                     ),
                     use_container_width=True,
+                    key=f"{key_prefix}_agent_perf_chart",
                 )
-                st.dataframe(ap, use_container_width=True, hide_index=True)
+                st.dataframe(ap, use_container_width=True, hide_index=True, key=f"{key_prefix}_agent_perf_table")
         with col_b:
             st.subheader("🎯 트리거별 성과")
             tp = dl.paper_trigger_perf(df)
@@ -204,8 +217,25 @@ with tab_paper:
                     ch.bar_compare(tp["트리거"], tp["평균수익률"],
                                    "트리거별 평균수익률", "평균수익률 (%)"),
                     use_container_width=True,
+                    key=f"{key_prefix}_trigger_perf_chart",
                 )
-                st.dataframe(tp, use_container_width=True, hide_index=True)
+                st.dataframe(tp, use_container_width=True, hide_index=True, key=f"{key_prefix}_trigger_perf_table")
+
+
+# ── 탭 렌더링 ────────────────────────────────────────────────────────────
+with tab_paper:
+    st.caption(
+        f"📅 {dl.STRATEGY_CUTOFF[:10]} 이후(reversion 피처 12→4 축소) 데이터만 표시합니다. "
+        "이전 기록은 '📜 과거 전략' 탭에서 확인하세요."
+    )
+    _render_paper_tab(_df_paper_cur, "cur")
+
+with tab_paper_past:
+    st.caption(
+        f"📅 {dl.STRATEGY_CUTOFF[:10]} 이전, 구버전(reversion 12피처) 페이퍼테스트 기록입니다. "
+        "현재 운용 전략과 다르므로 참고용으로만 확인하세요."
+    )
+    _render_paper_tab(_df_paper_past, "past")
 
 
 # ═════════════════════════════════════════════════════════════════════════
