@@ -453,8 +453,11 @@ python3 runner.py
 # Telegram bot
 python3 telegram_bot.py
 
+# 45-day intraday ML backtest
+python3 -m backtest.backtest_ml
+
 # Slot-separated combined backtest
-python3 combined_backtest.py
+python3 -m backtest.combined_backtest_v2
 ```
 
 ---
@@ -515,7 +518,7 @@ quant_trader/
 │   └── models/                  # {ticker}_momentum.pkl / {ticker}_reversion.pkl
 │
 ├── news_briefing/               # News briefing pipeline (fetch→select→write→verify)
-│   └── service.py               # run_morning / run_evening entry points (+12 modules)
+│   └── service.py               # run_morning / run_evening entry points (+11 modules)
 │
 ├── portfolio/
 │   └── kelly.py                 # Kelly Criterion position sizing

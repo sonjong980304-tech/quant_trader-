@@ -502,10 +502,10 @@ python3 runner.py
 python3 telegram_bot.py
 
 # 45일 분봉 백테스트
-python3 backtest_ml.py
+python3 -m backtest.backtest_ml
 
 # 슬롯 분리 합산 백테스트
-python3 combined_backtest.py
+python3 -m backtest.combined_backtest_v2
 ```
 
 ---
@@ -566,7 +566,7 @@ quant_trader/
 │   └── models/                  # {ticker}_momentum.pkl / {ticker}_reversion.pkl
 │
 ├── news_briefing/               # 뉴스 브리핑 파이프라인 (수집→선별→작성→검증)
-│   └── service.py               # run_morning / run_evening 진입점 (외 12개 모듈)
+│   └── service.py               # run_morning / run_evening 진입점 (외 11개 모듈)
 │
 ├── portfolio/
 │   └── kelly.py                 # 켈리 공식 포지션 사이징

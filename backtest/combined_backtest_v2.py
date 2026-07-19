@@ -42,7 +42,7 @@ from ml.features import (
     add_features, _triple_barrier_pnl,
     detect_reversion_rows, FEATURE_COLS_REVERSION,
 )
-from config import ML_MIN_WIN_PROB
+from config import ML_MIN_WIN_PROB, ML_MIN_RISK_REWARD
 
 # ═══════════════════════════════════════════════════════════════════
 # 상수
