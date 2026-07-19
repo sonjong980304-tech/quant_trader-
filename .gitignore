@@ -1,27 +1,40 @@
+# ── 환경변수 / 시크릿 ─────────────────────────────────────────────
 .env
 .kis_token_cache.json
+
+# ── 파이썬 캐시 / 커버리지 ────────────────────────────────────────
 __pycache__/
 *.pyc
+.coverage
+
+# ── 로그 / 백테스트 결과물 ────────────────────────────────────────
 logs/
 results/
+
+# ── OS ────────────────────────────────────────────────────────────
 .DS_Store
+
+# ── 이미지 (docs/ 하위 자료용 png는 예외) ─────────────────────────
 *.png
+!docs/*.png
+
+# ── 로컬 전용 설정 (launchd, OMC 상태) ────────────────────────────
 *.plist
-stocks.py
 .omc/
-conditional_orders.json
-ml/models/
-trade_history.csv
+stocks.py
+
+# ── 런타임 상태 파일 — 봇이 돌면서 계속 바뀌는 파일, 절대 커밋 금지 ──
 state.json
 paper_positions.json
 paper_trades.json
-!docs/*.png
-news_briefing.db*
-.catchup_last.json
 paper_meta.json
 paper_params_snapshot.json
 pending_orders.json
-.coverage
-*.bak
-*.bak_*
-*.bak-*
+conditional_orders.json
+.catchup_last.json
+trade_history.csv
+news_briefing.db*
+ml/models/
+
+# ── 백업 파일 ─────────────────────────────────────────────────────
+*.bak*
