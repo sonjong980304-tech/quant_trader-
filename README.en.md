@@ -419,7 +419,8 @@ Common layer:
 ```bash
 git clone https://github.com/sonjong980304-tech/quant_trader-.git
 cd quant_trader
-bash install.sh
+pip install -r requirements.txt
+cp .env.example .env   # fill in values per "API Key Setup" below
 ```
 
 ---

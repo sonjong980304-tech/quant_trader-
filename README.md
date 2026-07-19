@@ -471,7 +471,8 @@ P4 실거래 게이트 기준
 ```bash
 git clone https://github.com/sonjong980304-tech/quant_trader-.git
 cd quant_trader
-bash install.sh
+pip install -r requirements.txt
+cp .env.example .env   # 아래 "API 키 설정"에 맞춰 값 입력
 ```
 
 ### API 키 설정 (.env)
