@@ -4,6 +4,8 @@ pending_confirmations.py - EOD 매수 신호 텔레그램 확인 대기 목록
 runner.py가 EOD 신호를 발견하면 이 모듈에 저장하고 인라인 키보드로 확인 요청.
 telegram_bot.py의 CallbackQueryHandler가 ✅/❌ 응답을 처리.
 """
+from __future__ import annotations  # dict | None 등 PEP604 표기를 Python 3.9(실제 운영 인터프리터)에서도 쓰기 위함
+
 import json
 import os
 import uuid
