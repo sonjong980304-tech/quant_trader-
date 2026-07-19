@@ -34,7 +34,7 @@ def _is_market_open(is_us: bool) -> bool:
     kr_min = now_kst.hour * 60 + now_kst.minute
     return is_kr_trading_day(now_kst.date()) and (9 * 60 <= kr_min < 15 * 60 + 30)
 
-_STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.json")
+_STATE_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "state.json")
 
 
 def _load_state() -> dict:

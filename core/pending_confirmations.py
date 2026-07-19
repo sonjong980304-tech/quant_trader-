@@ -12,7 +12,7 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-_PATH = os.path.join(os.path.dirname(__file__), "buy_confirmations.json")
+_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "buy_confirmations.json")
 
 
 def _load() -> dict:

@@ -609,7 +609,7 @@ def _walk_strategy(ticker: str, df_daily: pd.DataFrame, strategy: str,
         avg_loss  = SL_PCT
         if strategy == "ml":
             model_path = os.path.join(
-                os.path.dirname(__file__), "ml", "models",
+                os.path.dirname(os.path.dirname(__file__)), "ml", "models",
                 f"{ticker.replace('.', '_')}_wf_f{fold_i}.pkl",
             )
             if os.path.exists(model_path):
@@ -954,7 +954,7 @@ def run_f3_analysis(stocks: dict | None = None) -> str:
         if not stocks:
             stocks = _FALLBACK_STOCKS
 
-    model_dir = os.path.join(os.path.dirname(__file__), "ml", "models")
+    model_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "ml", "models")
     lines: list[str] = ["📊 <b>F3 — 피처 중요도 + 임계값 분석</b>", ""]
 
     # ── Part 1: 피처 중요도 (fold 안정성) ──────────────────────────────────

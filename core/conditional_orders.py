@@ -16,7 +16,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-_ORDERS_FILE = Path(__file__).resolve().parent / "conditional_orders.json"
+_ORDERS_FILE = Path(__file__).resolve().parent.parent / "conditional_orders.json"
 
 
 def _load() -> list:

@@ -17,7 +17,7 @@ import pytz
 logger = logging.getLogger(__name__)
 
 KST          = pytz.timezone("Asia/Seoul")
-_ORDERS_PATH = os.path.join(os.path.dirname(__file__), "pending_orders.json")
+_ORDERS_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "pending_orders.json")
 
 
 def _read() -> list[dict]:

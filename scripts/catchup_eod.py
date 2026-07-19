@@ -36,7 +36,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger("catchup")
 
 KST     = pytz.timezone("Asia/Seoul")
-_MARKER = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".catchup_last.json")
+_MARKER = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".catchup_last.json")
 
 
 def _today() -> str:

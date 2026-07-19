@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 KST = pytz.timezone("Asia/Seoul")
 
 # ─── 경로 ────────────────────────────────────────────────────────────────────
-_BASE_DIR       = os.path.dirname(os.path.abspath(__file__))
+_BASE_DIR       = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TRADES_PATH     = os.path.join(_BASE_DIR, "paper_trades.json")
 POS_PATH        = os.path.join(_BASE_DIR, "paper_positions.json")
 META_PATH       = os.path.join(_BASE_DIR, "paper_meta.json")
