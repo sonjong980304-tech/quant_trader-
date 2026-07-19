@@ -463,55 +463,79 @@ python3 combined_backtest.py
 
 ```
 quant_trader/
-├── config.py               # Strategy parameters / API configuration
-├── stocks.py               # Watchlist (STOCKS)
-├── runner.py               # Scheduler
-├── telegram_bot.py         # Telegram bot
-├── langchain_agent.py      # LangGraph ReAct AI assistant
-├── pending_confirmations.py # EOD buy signal confirmation queue
-├── trader.py               # KIS API (domestic)
-├── trade_logger.py         # Trade history CSV recorder + Telegram sender
-├── backtest_ml.py          # 45-day intraday ML backtest
-├── backtest_walkforward.py # Walk-forward backtest (cost-adjusted)
-├── combined_backtest.py    # Slot-separated combined backtest
-├── paper_trader.py         # Paper trading engine (separated 10+10, Circuit Breaker)
-├── position_manager.py     # ML position tracking and bot activation state
-├── trend_agent.py          # Trend Following agent
-├── tests/
-│   ├── test_triple_barrier.py      # Triple-Barrier labeling unit tests
-│   ├── test_paper_trader.py        # Paper trading engine unit tests
-│   └── test_position_manager.py    # ML position tracking unit tests
-├── morning_briefer.py      # Morning briefing (LangGraph quality retry loop)
-├── data_fetcher.py         # yfinance daily + KIS intraday
-├── indicators.py           # MA / RSI / Bollinger Bands
-├── strategy.py             # MA/RSI buy · sell signals
-├── notifier.py             # Telegram message builder
-├── news_fetcher.py         # Naver News API
-├── naver_finance.py        # Naver Finance fundamentals scraper
-├── conditional_orders.py   # Conditional orders (price/return conditions)
-├── market_calendar.py      # KRX trading day cache
-├── market_regime.py        # KOSPI market regime filter
-├── gpt_agent.py            # GPT tool functions
-├── signals/
-│   ├── signal_graph.py     # LangGraph StateGraph signal detection pipeline
-│   ├── scanner.py          # Technical trigger detection + ML agent evaluation
-│   ├── krx_universe.py     # KRX full universe first-pass screening
-│   └── alert.py            # Growth stock signal alert message
-├── state.json              # Bot activation gate
-├── trade_history.csv       # Trade history
-├── ml/
-│   ├── features.py         # Feature engineering + Triple-Barrier labeling
-│   ├── model.py            # XGBoost training & prediction
-│   ├── trainer.py          # KRX universe parallel retraining
-│   └── models/             # {ticker}_reversion.pkl
+├── config.py                    # Strategy parameters / API config (shared, kept at root)
+├── runner.py                    # EOD scheduler (launchd: com.quant.trader, kept at root)
+├── telegram_bot.py              # Telegram bot (launchd: com.quant.telegrambot, kept at root)
+│
+├── core/                        # Trade execution · positions · orders
+│   ├── position_manager.py      # Live ML position tracking + bot activation gate
+│   ├── paper_trader.py          # Paper trading engine (10+10 slots, Circuit Breaker)
+│   ├── trader.py                # KIS API (domestic)
+│   ├── trade_logger.py          # Trade history CSV recorder + Telegram sender
+│   ├── conditional_orders.py    # Conditional orders (price/return conditions)
+│   ├── pending_orders.py        # Next-open reserved buy queue
+│   └── pending_confirmations.py # EOD buy signal confirmation queue
+│
+├── strategy/                    # Signals · indicators · market regime
+│   ├── strategy.py              # Reversion trigger detection (signal generation)
+│   ├── indicators.py            # MA / RSI / Bollinger Bands, etc.
+│   ├── trend_agent.py           # Trend Following agent
+│   ├── market_regime.py         # KOSPI market regime filter
+│   └── market_calendar.py       # KRX trading day cache
+│
+├── data/                        # Price · fundamentals · news collection
+│   ├── data_fetcher.py          # yfinance daily + KIS intraday
+│   ├── naver_finance.py         # Naver Finance fundamentals scraper
+│   └── news_fetcher.py          # Naver News API
+│
+├── interface/                   # External interfaces (alerts · AI)
+│   ├── notifier.py              # Telegram message builder / sender
+│   └── langchain_agent.py       # LangGraph ReAct AI assistant
+│
+├── backtest/                    # Backtesting
+│   ├── backtest_ml.py           # 45-day intraday ML backtest
+│   ├── backtest_walkforward.py  # Walk-forward backtest (cost-adjusted)
+│   └── combined_backtest_v2.py  # Rolling 3yr × PIT universe comparison backtest
+│
+├── scripts/                     # Manual-run scripts
+│   └── catchup_eod.py           # Night-time manual catch-up for missed KR EOD tasks
+│
+├── signals/                     # Signal detection pipeline
+│   ├── signal_graph.py          # LangGraph StateGraph signal detection
+│   ├── scanner.py               # Technical trigger detection + ML agent evaluation
+│   ├── krx_universe.py          # KRX universe screening
+│   ├── us_universe.py           # US universe
+│   └── alert.py                 # Growth stock signal alert message
+│
+├── ml/                          # Machine learning
+│   ├── features.py              # Feature engineering + Triple-Barrier labeling
+│   ├── model.py                 # XGBoost training & prediction
+│   ├── regime_model.py          # Regime classification model
+│   ├── trainer.py               # KRX universe parallel retraining
+│   └── models/                  # {ticker}_momentum.pkl / {ticker}_reversion.pkl
+│
+├── news_briefing/               # News briefing pipeline (fetch→select→write→verify)
+│   └── service.py               # run_morning / run_evening entry points (+12 modules)
+│
 ├── portfolio/
-│   └── kelly.py            # Kelly Criterion position sizing
-├── logs/
-│   └── trader.log
-├── com.quant.trader.plist
-├── com.quant.telegrambot.plist
-└── com.quant.dashboard.plist
+│   └── kelly.py                 # Kelly Criterion position sizing
+│
+├── dashboard/                   # Streamlit dashboard
+│   ├── app.py                   # Main app (paper / live tabs)
+│   ├── data_loader.py           # JSON/CSV data reader
+│   ├── kis_live.py              # KIS real-time price (10s cache)
+│   └── charts.py                # plotly charts
+│
+└── tests/                       # Unit tests (run per-file — sys.modules mock isolation)
 ```
+
+> **Root-kept files**: `runner.py` and `telegram_bot.py` are referenced directly by launchd
+> daemons, and `config.py` is shared config, so they stay at the root. The remaining
+> trading/strategy/data/backtest modules are split into role-based packages
+> (`core`, `strategy`, `data`, `interface`, `backtest`, `scripts`). To run a backtest/script
+> under a sub-folder directly, run it from the repo root as a module
+> (e.g. `python -m backtest.backtest_ml`), or rely on the repo-root sys.path bootstrap
+> at the top of each such file.
 
 ---
 

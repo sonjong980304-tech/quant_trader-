@@ -514,55 +514,77 @@ python3 combined_backtest.py
 
 ```
 quant_trader/
-├── config.py               # 전략 파라미터 / API 설정
-├── stocks.py               # 관심종목 (STOCKS)
-├── runner.py               # 스케줄러
-├── telegram_bot.py         # 텔레그램 봇
-├── langchain_agent.py      # LangGraph ReAct AI 어시스턴트
-├── pending_confirmations.py # EOD 매수 신호 확인 대기 목록
-├── trader.py               # KIS API (국내)
-├── trade_logger.py         # 매매 이력 CSV 기록 + 텔레그램 전송
-├── backtest_ml.py          # 45일 분봉 ML 백테스트
-├── backtest_walkforward.py # Walk-forward 백테스트 (비용 반영)
-├── combined_backtest.py    # 슬롯 분리 합산 백테스트
-├── paper_trader.py         # 페이퍼 트레이딩 엔진 (슬롯 분리 10+10, Circuit Breaker)
-├── position_manager.py     # ML 포지션 추적 및 봇 활성화 상태 관리
-├── trend_agent.py          # Trend Following 에이전트
-├── tests/
-│   ├── test_triple_barrier.py      # Triple-Barrier 라벨링 단위 테스트
-│   ├── test_paper_trader.py        # 페이퍼 트레이딩 엔진 단위 테스트
-│   └── test_position_manager.py    # ML 포지션 추적 단위 테스트
-├── morning_briefer.py      # 모닝 브리핑 (LangGraph 품질 재시도 루프)
-├── data_fetcher.py         # yfinance 일봉 + KIS 분봉
-├── indicators.py           # MA / RSI / 볼린저밴드
-├── strategy.py             # MA/RSI 매수·매도 신호
-├── notifier.py             # 텔레그램 메시지 빌더
-├── news_fetcher.py         # 네이버 뉴스 API
-├── naver_finance.py        # 네이버 증권 재무지표 스크래핑
-├── conditional_orders.py   # 조건부 주문 (가격/수익률 조건)
-├── market_calendar.py      # KRX 영업일 캐시
-├── market_regime.py        # KOSPI 시장 상황 필터
-├── gpt_agent.py            # GPT 툴 함수
-├── signals/
-│   ├── signal_graph.py     # LangGraph StateGraph 신호 탐지 파이프라인
-│   ├── scanner.py          # 기술적 트리거 탐지 + ML 에이전트 평가
-│   ├── krx_universe.py     # KRX 전체 종목 1차 스크리닝
-│   └── alert.py            # 급등주 신호 알림 메시지
-├── state.json              # 봇 활성화 게이트
-├── trade_history.csv       # 매매 이력
-├── ml/
-│   ├── features.py         # 피처 엔지니어링 + Triple-Barrier 라벨링
-│   ├── model.py            # XGBoost 학습·예측
-│   ├── trainer.py          # KRX 유니버스 병렬 재학습
-│   └── models/             # {ticker}_momentum.pkl / {ticker}_reversion.pkl
+├── config.py                    # 전략 파라미터 / API 설정 (공용, 루트 유지)
+├── runner.py                    # EOD 스케줄러 (launchd: com.quant.trader, 루트 유지)
+├── telegram_bot.py              # 텔레그램 봇 (launchd: com.quant.telegrambot, 루트 유지)
+│
+├── core/                        # 매매 실행 · 포지션 · 주문
+│   ├── position_manager.py      # 실매매 ML 포지션 추적 + 봇 활성화 게이트
+│   ├── paper_trader.py          # 페이퍼 트레이딩 엔진 (슬롯 10+10, Circuit Breaker)
+│   ├── trader.py                # KIS API (국내)
+│   ├── trade_logger.py          # 매매 이력 CSV 기록 + 텔레그램 전송
+│   ├── conditional_orders.py    # 조건부 주문 (가격/수익률 조건)
+│   ├── pending_orders.py        # 시초가 예약 매수 대기열
+│   └── pending_confirmations.py # EOD 매수 신호 확인 대기 목록
+│
+├── strategy/                    # 신호 · 지표 · 시장 레짐
+│   ├── strategy.py              # Reversion 트리거 탐지 (신호 생성)
+│   ├── indicators.py            # MA / RSI / 볼린저밴드 등 기술적 지표
+│   ├── trend_agent.py           # Trend Following 에이전트
+│   ├── market_regime.py         # KOSPI 시장 레짐 필터
+│   └── market_calendar.py       # KRX 영업일 캐시
+│
+├── data/                        # 시세 · 재무 · 뉴스 수집
+│   ├── data_fetcher.py          # yfinance 일봉 + KIS 분봉
+│   ├── naver_finance.py         # 네이버 증권 재무지표 스크래핑
+│   └── news_fetcher.py          # 네이버 뉴스 API
+│
+├── interface/                   # 외부 인터페이스 (알림 · AI)
+│   ├── notifier.py              # 텔레그램 메시지 빌더 / 전송
+│   └── langchain_agent.py       # LangGraph ReAct AI 어시스턴트
+│
+├── backtest/                    # 백테스트
+│   ├── backtest_ml.py           # 45일 분봉 ML 백테스트
+│   ├── backtest_walkforward.py  # Walk-forward 백테스트 (비용 반영)
+│   └── combined_backtest_v2.py  # Rolling 3년 × PIT 유니버스 비교 백테스트
+│
+├── scripts/                     # 수동 실행 스크립트
+│   └── catchup_eod.py           # 놓친 KR 오후 EOD 작업 야간 수동 실행
+│
+├── signals/                     # 신호 탐지 파이프라인
+│   ├── signal_graph.py          # LangGraph StateGraph 신호 탐지
+│   ├── scanner.py               # 기술적 트리거 탐지 + ML 에이전트 평가
+│   ├── krx_universe.py          # KRX 종목 스크리닝
+│   ├── us_universe.py           # 미국 종목 유니버스
+│   └── alert.py                 # 급등주 신호 알림 메시지
+│
+├── ml/                          # 머신러닝
+│   ├── features.py              # 피처 엔지니어링 + Triple-Barrier 라벨링
+│   ├── model.py                 # XGBoost 학습 · 예측
+│   ├── regime_model.py          # 레짐 판정 모델
+│   ├── trainer.py               # KRX 유니버스 병렬 재학습
+│   └── models/                  # {ticker}_momentum.pkl / {ticker}_reversion.pkl
+│
+├── news_briefing/               # 뉴스 브리핑 파이프라인 (수집→선별→작성→검증)
+│   └── service.py               # run_morning / run_evening 진입점 (외 12개 모듈)
+│
 ├── portfolio/
-│   └── kelly.py            # 켈리 공식 포지션 사이징
-├── logs/
-│   └── trader.log
-├── com.quant.trader.plist
-├── com.quant.telegrambot.plist
-└── com.quant.dashboard.plist
+│   └── kelly.py                 # 켈리 공식 포지션 사이징
+│
+├── dashboard/                   # Streamlit 대시보드
+│   ├── app.py                   # 메인 앱 (페이퍼 / 실매매 탭)
+│   ├── data_loader.py           # JSON/CSV 데이터 읽기
+│   ├── kis_live.py              # KIS 실시간 현재가 (10초 캐싱)
+│   └── charts.py                # plotly 그래프 모음
+│
+└── tests/                       # 단위 테스트 (파일별 개별 실행 권장 — sys.modules mock 격리)
 ```
+
+> **루트 유지 파일**: `runner.py`·`telegram_bot.py`는 launchd 데몬이 직접 참조하고, `config.py`는
+> 여러 모듈이 공유하는 설정이라 폴더로 옮기지 않습니다. 나머지 매매/전략/데이터/백테스트 모듈은
+> 역할별 패키지(`core`·`strategy`·`data`·`interface`·`backtest`·`scripts`)로 분리했습니다.
+> 하위 폴더의 백테스트·스크립트를 직접 실행할 때는 저장소 루트에서 `python -m backtest.backtest_ml`
+> 처럼 모듈 형태로 실행하거나(권장), 각 파일 상단의 repo-root sys.path 부트스트랩이 경로를 보정합니다.
 
 ---
 

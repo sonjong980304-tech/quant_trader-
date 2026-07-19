@@ -71,7 +71,7 @@ def _notify_regime_change(prev: dict, is_blocked: bool, is_bear: bool, adr_bear:
                           lc: float, adr: float | None) -> None:
     """상태 변화 시 텔레그램 알림 전송."""
     try:
-        from notifier import send_telegram
+        from interface.notifier import send_telegram
     except Exception:
         return
 

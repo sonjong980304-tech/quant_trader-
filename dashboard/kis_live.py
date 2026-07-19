@@ -29,7 +29,7 @@ def _get_trader():
         from config import KIS_APP_KEY
         if not KIS_APP_KEY:
             return None
-        from trader import KISTrader
+        from core.trader import KISTrader
         return KISTrader()
     except Exception:
         return None

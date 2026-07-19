@@ -25,6 +25,9 @@ Triple-Barrier 청산:
 
 from __future__ import annotations
 
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))  # repo-root: 하위 폴더에서 직접 실행 대비
+
 import logging
 import sys
 import warnings
@@ -1456,7 +1459,7 @@ def run_h4_regime_diagnostics(stocks: dict | None = None) -> str:
 
 def _run_universe(stocks: dict, horizon: int, slip: float) -> list[dict]:
     """전역 HORIZON/SLIPPAGE_PCT를 임시 변경해 유니버스 전체 백테스트. trades 반환."""
-    import backtest_walkforward as _bw
+    import backtest.backtest_walkforward as _bw
     old_h, old_s = _bw.HORIZON, _bw.SLIPPAGE_PCT
     _bw.HORIZON      = horizon
     _bw.SLIPPAGE_PCT = slip
@@ -1578,7 +1581,7 @@ def run_b3_slip_sensitivity(stocks: dict | None = None) -> str:
         row_str = "%-8s" % ("%d일" % h)
         for s in slips:
             # 비용 후처리: raw_pnl에 cost 재적용
-            import backtest_walkforward as _bw
+            import backtest.backtest_walkforward as _bw
             old_s = _bw.SLIPPAGE_PCT
             _bw.SLIPPAGE_PCT = s
             try:
@@ -1835,7 +1838,7 @@ def run_g1_grid(stocks: dict | None = None) -> str:
     SL_RANGE = [0.04, 0.05, 0.06, 0.07]
     GRID     = tp > sl 조건, 총 16개 + 현재 기준(7/7) 포함
     """
-    import backtest_walkforward as _bw
+    import backtest.backtest_walkforward as _bw
 
     TP_RANGE = [0.07, 0.09, 0.10, 0.12, 0.15]
     SL_RANGE = [0.04, 0.05, 0.06, 0.07]

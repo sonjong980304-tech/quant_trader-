@@ -16,6 +16,9 @@ backtest_ml.py - 분봉 기반 45일 ML 전략 백테스트
 
 from __future__ import annotations
 
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))  # repo-root: 하위 폴더에서 직접 실행 대비
+
 import logging
 import os
 import pickle

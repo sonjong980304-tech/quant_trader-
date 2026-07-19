@@ -7,6 +7,9 @@ ML 없이 순수 규칙: ADX + 이동평균 정배열 + 트레일링 스톱
 """
 from __future__ import annotations
 
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))  # repo-root: 하위 폴더에서 직접 실행 대비
+
 import warnings
 warnings.filterwarnings("ignore")
 

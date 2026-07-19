@@ -15,7 +15,7 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from market_regime import regime_allows_trend
+from strategy.market_regime import regime_allows_trend
 
 
 class TestRegimeAllowsTrend:

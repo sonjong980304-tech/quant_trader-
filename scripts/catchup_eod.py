@@ -27,6 +27,9 @@ import json
 import logging
 from datetime import datetime
 
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))  # repo-root: scripts/에서 직접 실행 시 runner import 보장
+
 import pytz
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")

@@ -126,7 +126,7 @@ def _call_yahoo_finance(ticker: str) -> str:
 
 def _call_naver_news(query: str, n: int = 5) -> str:
     try:
-        from news_fetcher import fetch_naver_news
+        from data.news_fetcher import fetch_naver_news
         n = min(max(1, n), 10)
         items = fetch_naver_news(query, n=n)
         if not items:
@@ -155,7 +155,7 @@ def _call_historical_price(identifier: str, date: str) -> str:
         import yfinance as yf
         import pandas as pd
         from datetime import timedelta
-        from naver_finance import _resolve_code
+        from data.naver_finance import _resolve_code
 
         code, name = _resolve_code(identifier)
         if not code:
@@ -202,9 +202,9 @@ def _call_stock_signal(identifier: str) -> str:
             STOCKS, MA_SHORT, MA_LONG, RSI_PERIOD,
             VOLUME_LOOKBACK_DAYS, VOLUME_INCREASE_RATIO, VOLUME_SURGE_RATIO,
         )
-        from data_fetcher import fetch_ohlcv
-        from indicators import add_all_indicators, detect_crossover
-        from strategy import generate_signals, get_latest_signal
+        from data.data_fetcher import fetch_ohlcv
+        from strategy.indicators import add_all_indicators, detect_crossover
+        from strategy.strategy import generate_signals, get_latest_signal
 
         ticker = None
         stock_name = identifier
@@ -233,7 +233,7 @@ def _call_stock_signal(identifier: str) -> str:
         df = fetch_ohlcv(ticker, period_years=1)
         try:
             from runner import _append_today_bar
-            from data_fetcher import get_minute_data
+            from data.data_fetcher import get_minute_data
             minute_df = None
             try:
                 minute_df = get_minute_data(ticker, interval_min=1)
@@ -320,7 +320,7 @@ def _call_set_conditional_order(stock_name: str, condition_type: str,
                                 condition_value: float, action: str, quantity: int,
                                 stock_code: str = "") -> str:
     try:
-        from conditional_orders import add_order
+        from core.conditional_orders import add_order
         ticker = ""
 
         if stock_code:
@@ -403,7 +403,7 @@ def _call_set_conditional_order(stock_name: str, condition_type: str,
 
 def _call_list_conditional_orders() -> str:
     try:
-        from conditional_orders import list_orders
+        from core.conditional_orders import list_orders
         orders = list_orders()
         if not orders:
             return "등록된 조건부 주문이 없습니다."
@@ -428,7 +428,7 @@ def _call_list_conditional_orders() -> str:
 
 def _call_cancel_conditional_order(order_id: str) -> str:
     try:
-        from conditional_orders import cancel_order, list_orders
+        from core.conditional_orders import cancel_order, list_orders
         if order_id.lower() == "all":
             orders = list_orders()
             for o in orders:
@@ -451,7 +451,7 @@ def get_naver_finance(identifier: str) -> str:
     Naver 증권에서 한국 주식 재무정보(PER, PBR, ROE, EPS, 현재가 등)를 조회합니다.
     identifier: 종목명(예: '삼성전자') 또는 6자리 코드(예: '005930')
     """
-    from naver_finance import get_financials
+    from data.naver_finance import get_financials
     return get_financials(identifier)
 
 
@@ -497,7 +497,7 @@ def get_historical_price(identifier: str, date: str) -> str:
 def get_account_balance() -> str:
     """현재 계좌 잔고와 보유 종목 현황을 조회합니다 (국내 + 미국주식)."""
     try:
-        from trader import KISTrader
+        from core.trader import KISTrader
         from config import KIS_APP_KEY, IS_MOCK
         if not KIS_APP_KEY:
             return "KIS_APP_KEY 미설정 — 잔고 조회 불가"
@@ -543,7 +543,7 @@ def get_account_balance() -> str:
 def get_portfolio_status() -> str:
     """페이퍼 트레이딩 포지션 현황 (reversion + trend 슬롯 분리 10+10)을 확인합니다."""
     try:
-        from paper_trader import _load, POS_PATH
+        from core.paper_trader import _load, POS_PATH
         from config import REV_SLOTS, TR_SLOTS
         positions = _load(POS_PATH, {})
         rev = [p for p in positions.values() if p.get("agent") == "reversion"]
@@ -597,7 +597,7 @@ def get_paper_status(market: str = "KR") -> str:
     - 현재 오픈 포지션 목록과 미실현 손익
     - 현재 세션 누적 통계 (청산 건수, 승률, 기대수익률)
     """
-    from paper_trader import get_metrics, _load, POS_PATH, TRADES_PATH
+    from core.paper_trader import get_metrics, _load, POS_PATH, TRADES_PATH
     import json
 
     mkt = None if market == "all" else market.upper()
@@ -647,7 +647,7 @@ def list_trade_records(status: str = "all") -> str:
     매매 이력 CSV를 조회합니다.
     status: 'open'(미청산), 'closed'(청산완료), 'all'(전체)
     """
-    from trade_logger import _read_all
+    from core.trade_logger import _read_all
     rows = _read_all()
     if status == "open":
         rows = [r for r in rows if not r.get("exit_date")]
@@ -675,7 +675,7 @@ def edit_trade_record(trade_id: str, field: str, value: str) -> str:
     value: 새로운 값
     수정 불가 컬럼: trade_id, ticker, side
     """
-    from trade_logger import _read_all, _write_all
+    from core.trade_logger import _read_all, _write_all
     IMMUTABLE = {"trade_id", "ticker", "side"}
     if field in IMMUTABLE:
         return f"⚠️ '{field}'는 수정 불가 컬럼입니다."
@@ -724,7 +724,7 @@ def edit_trade_record(trade_id: str, field: str, value: str) -> str:
 
 def _build_system_prompt() -> str:
     try:
-        from trader import KISTrader
+        from core.trader import KISTrader
         from config import KIS_APP_KEY
         if KIS_APP_KEY:
             t        = KISTrader()

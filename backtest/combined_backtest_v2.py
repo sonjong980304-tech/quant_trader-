@@ -29,6 +29,9 @@ from __future__ import annotations
 import warnings
 warnings.filterwarnings("ignore")
 
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))  # repo-root: 하위 폴더에서 직접 실행 대비
+
 import sys
 import numpy as np
 import pandas as pd

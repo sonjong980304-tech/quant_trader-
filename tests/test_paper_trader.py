@@ -15,12 +15,12 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 # notifier 모킹 (텔레그램 실발송 차단)
-_mock_notifier = types.ModuleType("notifier")
+_mock_notifier = types.ModuleType("interface.notifier")
 _mock_notifier.send_telegram = lambda msg: True
-sys.modules["notifier"] = _mock_notifier
+sys.modules["interface.notifier"] = _mock_notifier
 
-import paper_trader as pt
-from backtest_walkforward import _apply_costs as bt_apply_costs
+import core.paper_trader as pt
+from backtest.backtest_walkforward import _apply_costs as bt_apply_costs
 
 
 # ─── fixtures ──────────────────────────────────────────────────────────────
@@ -193,7 +193,7 @@ class TestAnomalyGuard:
 
     def test_large_drop_flags_position_and_alerts_once(self, monkeypatch):
         """이상 감지 시 포지션에 플래그를 남기고 텔레그램 알림을 보낸다."""
-        import notifier
+        import interface.notifier as notifier
         alerts = []
         monkeypatch.setattr(notifier, "send_telegram", lambda msg: alerts.append(msg))
         self._setup()
@@ -204,7 +204,7 @@ class TestAnomalyGuard:
 
     def test_alert_not_resent_on_repeated_checks(self, monkeypatch):
         """같은 이상 상태가 반복돼도 알림을 매번 다시 보내지 않고, 포지션은 계속 동결된다."""
-        import notifier
+        import interface.notifier as notifier
         alerts = []
         monkeypatch.setattr(notifier, "send_telegram", lambda msg: alerts.append(msg))
         self._setup()
@@ -227,7 +227,7 @@ class TestEntryPriceAssumption:
 
     def test_cost_is_round_trip(self):
         """COST_KR 왕복 비용 = 진입·청산 양방향."""
-        from backtest_walkforward import COMMISSION_PCT, SLIPPAGE_PCT, STT_PCT
+        from backtest.backtest_walkforward import COMMISSION_PCT, SLIPPAGE_PCT, STT_PCT
         cost_kr = COMMISSION_PCT * 2 + SLIPPAGE_PCT + STT_PCT  # 0.0026 (slip=0.05%)
         assert abs(pt._bt_apply_costs(0.0, True) - (-cost_kr)) < 1e-9
 
@@ -448,7 +448,7 @@ class TestApplyCostsShared:
         assert abs(paper_net - (-pt.SL_PCT - 0.0026)) < 1e-9
 
     def test_us_ticker_uses_us_cost(self):
-        from backtest_walkforward import COMMISSION_PCT, SLIPPAGE_PCT
+        from backtest.backtest_walkforward import COMMISSION_PCT, SLIPPAGE_PCT
         cost_us = COMMISSION_PCT * 2 + SLIPPAGE_PCT   # STT 없음 (미국 주식)
         us_net  = bt_apply_costs(0.0, False)
         assert abs(us_net - (-cost_us)) < 1e-9

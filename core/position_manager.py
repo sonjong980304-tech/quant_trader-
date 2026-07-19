@@ -15,9 +15,9 @@ import yfinance as yf
 import pytz
 
 from config import KIS_APP_KEY, LIVE_TRADING, SL_PCT, SPLIT_GUARD_PCT
-from trader import KISTrader
-from notifier import send_telegram
-from market_calendar import is_kr_trading_day
+from core.trader import KISTrader
+from interface.notifier import send_telegram
+from strategy.market_calendar import is_kr_trading_day
 
 KST = pytz.timezone("Asia/Seoul")
 logger = logging.getLogger(__name__)
@@ -295,7 +295,7 @@ def check_ml_positions():
                     t.sell(code, qty)
 
             try:
-                from trade_logger import log_sell
+                from core.trade_logger import log_sell
                 log_sell(ticker, sell_price, qty=qty, notes=reason)
             except Exception as e:
                 logger.warning("[TradeLog] 매도 기록 실패 [%s]: %s", ticker, e)
@@ -321,7 +321,7 @@ def check_ml_positions():
         _save_state(state)
 
     try:
-        from paper_trader import evaluate_positions_auto
+        from core.paper_trader import evaluate_positions_auto
         evaluate_positions_auto()
     except Exception as _pe:
         logger.debug("[Paper] 포지션 평가 오류: %s", _pe)

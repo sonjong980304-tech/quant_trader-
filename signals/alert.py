@@ -11,7 +11,7 @@ alert.py - 급등 신호 자동 매수 실행 + 텔레그램 알림
 """
 
 import logging
-from notifier import send_telegram
+from interface.notifier import send_telegram
 from portfolio.kelly import kelly_fraction, position_size
 
 logger = logging.getLogger(__name__)
@@ -55,7 +55,7 @@ def _execute_buy(signal: dict, growth_cash: float) -> tuple[int, float, str]:
     # 켈리 추천 0주 → 주문가능금액으로 최대 매수 재시도
     if qty <= 0 and KIS_APP_KEY:
         try:
-            from trader import KISTrader
+            from core.trader import KISTrader
             avail = float(KISTrader().get_available_cash())
             qty   = int(avail / price_for)
             if qty > 0:
@@ -72,7 +72,7 @@ def _execute_buy(signal: dict, growth_cash: float) -> tuple[int, float, str]:
     code = ticker.replace(".KS", "").replace(".KQ", "")
 
     try:
-        from trader import KISTrader
+        from core.trader import KISTrader
         t = KISTrader()
         if us:
             t.buy_us(code, qty)
@@ -80,7 +80,7 @@ def _execute_buy(signal: dict, growth_cash: float) -> tuple[int, float, str]:
             t.buy(code, qty)
 
         try:
-            from trade_logger import log_buy
+            from core.trade_logger import log_buy
             log_buy(
                 ticker, signal.get("name", ticker), price, qty,
                 strategy  = "ML급등주",

@@ -24,18 +24,18 @@ from config import (
     STOCKS, KIS_APP_KEY,
     LIVE_TRADING,
 )
-from position_manager import (
+from core.position_manager import (
     _load_state, _check_activation, is_bot_active,
     save_ml_position, check_ml_positions,
     _init_legacy_tickers,
 )
-from data_fetcher import fetch_ohlcv, get_minute_data
-from trader import KISTrader
-from notifier import send_telegram
-import notifier
+from data.data_fetcher import fetch_ohlcv, get_minute_data
+from core.trader import KISTrader
+from interface.notifier import send_telegram
+import interface.notifier as notifier
 from news_briefing.service import run_morning, run_evening
 from signals.signal_graph import scan_all_graph
-from market_calendar import is_kr_trading_day
+from strategy.market_calendar import is_kr_trading_day
 
 KST      = pytz.timezone("Asia/Seoul")
 LOG_FILE = "logs/trader.log"
@@ -218,7 +218,7 @@ def _append_today_bar(daily_df: pd.DataFrame, minute_df) -> pd.DataFrame:
 def _run_paper_evaluate_kr(trade_day: bool = False):
     """페이퍼 포지션 TP/SL 평가. trade_day=True 일 때만 trade_days 1일 증가."""
     try:
-        from paper_trader import evaluate_positions_auto
+        from core.paper_trader import evaluate_positions_auto
         evaluate_positions_auto(trade_day=trade_day)
     except Exception as e:
         logger.warning("[Paper] KR 포지션 평가 실패: %s", e)
@@ -237,7 +237,7 @@ def _run_paper_daily_report_kr():
     if datetime.now().weekday() >= 5:   # 토(5)·일(6) 스킵
         return
     try:
-        from paper_trader import daily_report
+        from core.paper_trader import daily_report
         daily_report(market="KR")
     except Exception as e:
         logger.warning("[Paper] KR 일일 리포트 실패: %s", e)
@@ -254,7 +254,7 @@ def _run_paper_daily_report_us():
         return
     _us_report_sent_date = today
     try:
-        from paper_trader import daily_report
+        from core.paper_trader import daily_report
         daily_report(market="US")
     except Exception as e:
         logger.warning("[Paper] US 일일 리포트 실패: %s", e)
@@ -263,7 +263,7 @@ def _run_paper_daily_report_us():
 def _run_paper_weekly_summary():
     """일요일 20:00 페이퍼 트레이딩 주차별 집계."""
     try:
-        from paper_trader import weekly_summary
+        from core.paper_trader import weekly_summary
         weekly_summary()
     except Exception as e:
         logger.warning("[Paper] 주차별 집계 실패: %s", e)
@@ -276,7 +276,7 @@ def _run_paper_entry_update(market: str):
     if market == "KR" and not is_kr_trading_day(datetime.now(KST).date()):
         return
     try:
-        from paper_trader import update_entry_prices
+        from core.paper_trader import update_entry_prices
         update_entry_prices(market)
     except Exception as e:
         logger.warning("[Paper] 시초가 업데이트 실패 (%s): %s", market, e)
@@ -338,7 +338,7 @@ def scan_growth_signals_eod():
     # LIVE_TRADING=False 시 페이퍼 포지션의 ticker도 중복 신호 차단
     if not LIVE_TRADING:
         try:
-            from paper_trader import _load as _pt_load, POS_PATH as _PT_POS
+            from core.paper_trader import _load as _pt_load, POS_PATH as _PT_POS
             _paper_pos = _pt_load(_PT_POS, {})
             held = held | {v["ticker"] for v in _paper_pos.values()}
         except Exception as _e:
@@ -363,7 +363,7 @@ def scan_growth_signals_eod():
     def _trend_regime_ok() -> bool:
         try:
             import yfinance as yf
-            from market_regime import regime_allows_trend
+            from strategy.market_regime import regime_allows_trend
             _k = yf.download("^KS11", period="400d", interval="1d", progress=False, auto_adjust=True)
             if _k is None or _k.empty:
                 logger.warning("[레짐 필터] KOSPI 데이터 없음 — fail-closed(trend 차단)")
@@ -387,7 +387,7 @@ def scan_growth_signals_eod():
             pass
     growth_cash = total_asset if total_asset > 0 else 10_000_000
 
-    from pending_orders import add_pending_order
+    from core.pending_orders import add_pending_order
     for sig in signals:
         if sig.get("agent") == "trend" and not _trend_allowed:
             logger.info("[레짐 필터] trend 차단 — KOSPI ≤ MA200 또는 20일낙폭 ≤ -5%: %s", sig.get("ticker"))
@@ -417,7 +417,7 @@ def scan_growth_signals_eod():
             logger.warning("[LIVE_TRADING=False] EOD 페이퍼: %s 승률=%.1f%%",
                            ticker, sig["win_prob"] * 100)
             try:
-                from paper_trader import log_paper_signal, is_circuit_breaker_active, can_add_position
+                from core.paper_trader import log_paper_signal, is_circuit_breaker_active, can_add_position
                 _agent = sig.get("agent", "reversion")
                 if not is_circuit_breaker_active() and can_add_position(_agent):
                     # 익일 시초가 진입 — EOD 종가는 eod_close로 저장, entry_price는 09:05에 확정
@@ -449,14 +449,14 @@ def scan_growth_signals_eod():
             )
             continue
 
-        from paper_trader import can_add_position as _cap_live
+        from core.paper_trader import can_add_position as _cap_live
         _agent_live = sig.get("agent", "reversion")
         if not _cap_live(_agent_live):
             logger.info("[슬롯 초과] %s agent=%s — 확인 스킵", ticker, _agent_live)
             continue
 
-        from pending_confirmations import add_confirmation
-        from notifier import send_buy_confirmation_keyboard
+        from core.pending_confirmations import add_confirmation
+        from interface.notifier import send_buy_confirmation_keyboard
 
         conf_id = add_confirmation(
             ticker  = ticker,
@@ -477,8 +477,8 @@ def scan_growth_signals_eod():
     # ── trend 에이전트 스캔 (ADX≥25 + MA정배열 + 거래량>1.3x) ──────────────────
     if _trend_allowed:
         try:
-            from trend_agent import compute_indicators as _ti_compute
-            from paper_trader import (
+            from strategy.trend_agent import compute_indicators as _ti_compute
+            from core.paper_trader import (
                 log_paper_signal as _lps,
                 can_add_position as _cap,
                 is_circuit_breaker_active as _icba,
@@ -524,8 +524,8 @@ def scan_growth_signals_eod():
                                 f"익일 09:00 시초가 진입 예약"
                             )
                         else:
-                            from pending_confirmations import add_confirmation
-                            from notifier import send_buy_confirmation_keyboard
+                            from core.pending_confirmations import add_confirmation
+                            from interface.notifier import send_buy_confirmation_keyboard
                             _rp_qty = max(1, int((total_asset * 0.01) / (2.0 * _atr))) if _atr > 0 and total_asset > 0 else max(1, int(growth_cash * 0.02 / _close))
                             _conf_id = add_confirmation(
                                 ticker  = _tk,
@@ -581,7 +581,7 @@ def scan_growth_signals_eod_us():
     held = set(_load_state().get("ml_positions", {}).keys())
     if not LIVE_TRADING:
         try:
-            from paper_trader import _load as _pt_load, POS_PATH as _PT_POS
+            from core.paper_trader import _load as _pt_load, POS_PATH as _PT_POS
             _paper_pos = _pt_load(_PT_POS, {})
             held = held | {v["ticker"] for v in _paper_pos.values()}
         except Exception as _e:
@@ -630,7 +630,7 @@ def scan_growth_signals_eod_us():
             logger.warning("[LIVE_TRADING=False] US EOD 페이퍼: %s 승률=%.1f%%",
                            ticker, sig["win_prob"] * 100)
             try:
-                from paper_trader import log_paper_signal, is_circuit_breaker_active
+                from core.paper_trader import log_paper_signal, is_circuit_breaker_active
                 if not is_circuit_breaker_active():
                     _ep_eod = float(sig.get("current_price") or 0.0)
                     log_paper_signal(
@@ -660,8 +660,8 @@ def scan_growth_signals_eod_us():
             )
             continue
 
-        from pending_confirmations import add_confirmation
-        from notifier import send_buy_confirmation_keyboard
+        from core.pending_confirmations import add_confirmation
+        from interface.notifier import send_buy_confirmation_keyboard
 
         conf_id = add_confirmation(
             ticker  = ticker,
@@ -693,8 +693,8 @@ def execute_pending_orders(market: str):
         if datetime.now(KST).astimezone(eastern).weekday() >= 5:
             return
 
-    from pending_orders import pop_pending_orders
-    from notifier import send_telegram
+    from core.pending_orders import pop_pending_orders
+    from interface.notifier import send_telegram
 
     orders = pop_pending_orders(market)
     if not orders:
@@ -709,7 +709,7 @@ def execute_pending_orders(market: str):
         action  = o["action"]
         is_us   = o["is_us"]
         try:
-            from trader import KISTrader
+            from core.trader import KISTrader
             t = KISTrader()
             if is_us:
                 price_info = t.get_us_current_price(code)
@@ -717,11 +717,11 @@ def execute_pending_orders(market: str):
                 name  = price_info.get("name", ticker)
                 if action == "BUY":
                     t.buy_us(code, qty)
-                    from trade_logger import log_buy
+                    from core.trade_logger import log_buy
                     log_buy(ticker, code, price, qty, strategy="예약매수")
                 else:
                     t.sell_us(code, qty)
-                    from trade_logger import log_sell
+                    from core.trade_logger import log_sell
                     log_sell(ticker, price, qty=qty, notes="예약매도")
                 price_str = f"${price:,.2f}"
             else:
@@ -730,11 +730,11 @@ def execute_pending_orders(market: str):
                 name  = price_info.get("name", ticker)
                 if action == "BUY":
                     t.buy(code, qty)
-                    from trade_logger import log_buy
+                    from core.trade_logger import log_buy
                     log_buy(ticker, name, price, qty, strategy="예약매수")
                 else:
                     t.sell(code, qty)
-                    from trade_logger import log_sell
+                    from core.trade_logger import log_sell
                     log_sell(ticker, price, qty=qty, notes="예약매도")
                 price_str = f"{price:,}원"
 
@@ -1007,7 +1007,7 @@ def main():
 
     # B1 전략 교체 기록 — paper 카운트 리셋 (이미 등록된 경우 skip)
     try:
-        from paper_trader import _load, META_PATH, register_logic_change
+        from core.paper_trader import _load, META_PATH, register_logic_change
         _hist = _load(META_PATH, {}).get("logic_change_history", [])
         if not any("B1" in h.get("reason", "") for h in _hist):
             register_logic_change("B1: EOD 익일 시초가 진입 전략 교체 (slip 0.25%→0.05%)")

@@ -24,10 +24,10 @@ from telegram.ext import (
 )
 
 from config import TELEGRAM_BOT_TOKEN, MA_SHORT, MA_LONG, RSI_PERIOD
-from langchain_agent import ask as gpt_ask, clear_history as gpt_clear
-from data_fetcher import fetch_ohlcv
-from indicators import add_all_indicators, detect_crossover
-from strategy import generate_signals, get_latest_signal
+from interface.langchain_agent import ask as gpt_ask, clear_history as gpt_clear
+from data.data_fetcher import fetch_ohlcv
+from strategy.indicators import add_all_indicators, detect_crossover
+from strategy.strategy import generate_signals, get_latest_signal
 
 # 급등주 신호 대기 중인 주문 {user_id: signal_dict}
 _pending_signals: dict[int, dict] = {}
@@ -142,14 +142,14 @@ async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     try:
         from config import KIS_APP_KEY
         if KIS_APP_KEY:
-            from trader import KISTrader
+            from core.trader import KISTrader
             trader = KISTrader()
     except Exception:
         pass
 
     for ticker, name in stocks.items():
         try:
-            from data_fetcher import get_minute_data
+            from data.data_fetcher import get_minute_data
             from runner import _append_today_bar
 
             raw_df    = fetch_ohlcv(ticker, period_years=1)
@@ -205,7 +205,7 @@ async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def cmd_balance(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("⏳ 잔고 조회 중...")
     try:
-        from trader import KISTrader
+        from core.trader import KISTrader
         from config import IS_MOCK
         t = KISTrader()
         balance = t.get_balance()
@@ -470,7 +470,7 @@ async def cmd_buy(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"⏳ [{market_tag}] {ticker} {qty}주 시장가 매수 주문 중...")
 
     try:
-        from trader import KISTrader
+        from core.trader import KISTrader
         t = KISTrader()
 
         if is_us:
@@ -480,7 +480,7 @@ async def cmd_buy(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             total_usd  = price * qty
             t.buy_us(code, qty)
             try:
-                from trade_logger import log_buy
+                from core.trade_logger import log_buy
                 log_buy(ticker, name, price, qty, strategy="수동")
             except Exception as log_e:
                 logger.warning("[TradeLog] 수동 매수 기록 실패 [%s]: %s", ticker, log_e)
@@ -505,7 +505,7 @@ async def cmd_buy(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 return
             t.buy(code, qty)
             try:
-                from trade_logger import log_buy
+                from core.trade_logger import log_buy
                 log_buy(ticker, name, price, qty, strategy="수동")
             except Exception as log_e:
                 logger.warning("[TradeLog] 수동 매수 기록 실패 [%s]: %s", ticker, log_e)
@@ -554,7 +554,7 @@ async def cmd_sell(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"⏳ [{market_tag}] {ticker} {qty}주 시장가 매도 주문 중...")
 
     try:
-        from trader import KISTrader
+        from core.trader import KISTrader
         t = KISTrader()
 
         if is_us:
@@ -568,7 +568,7 @@ async def cmd_sell(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             price      = price_info["price"]
             t.sell_us(code, qty)
             try:
-                from trade_logger import log_sell
+                from core.trade_logger import log_sell
                 log_sell(ticker, price, qty=qty, notes="수동매도")
             except Exception as log_e:
                 logger.warning("[TradeLog] 수동 매도 기록 실패 [%s]: %s", ticker, log_e)
@@ -592,7 +592,7 @@ async def cmd_sell(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             price      = price_info["price"]
             t.sell(code, qty)
             try:
-                from trade_logger import log_sell
+                from core.trade_logger import log_sell
                 log_sell(ticker, price, qty=qty, notes="수동매도")
             except Exception as log_e:
                 logger.warning("[TradeLog] 수동 매도 기록 실패 [%s]: %s", ticker, log_e)
@@ -629,7 +629,7 @@ async def cmd_sellall(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"⏳ [{market_tag}] {ticker} 전량 매도 주문 중...")
 
     try:
-        from trader import KISTrader
+        from core.trader import KISTrader
         t = KISTrader()
 
         if is_us:
@@ -643,7 +643,7 @@ async def cmd_sellall(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             price      = price_info["price"]
             t.sell_us(code, qty)
             try:
-                from trade_logger import log_sell
+                from core.trade_logger import log_sell
                 log_sell(ticker, price, qty=qty, notes="수동전량매도")
             except Exception as log_e:
                 logger.warning("[TradeLog] 수동 매도 기록 실패 [%s]: %s", ticker, log_e)
@@ -663,7 +663,7 @@ async def cmd_sellall(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             price      = price_info["price"]
             t.sell(code, qty)
             try:
-                from trade_logger import log_sell
+                from core.trade_logger import log_sell
                 log_sell(ticker, price, qty=qty, notes="수동전량매도")
             except Exception as log_e:
                 logger.warning("[TradeLog] 수동 매도 기록 실패 [%s]: %s", ticker, log_e)
@@ -704,7 +704,7 @@ async def cmd_buynext(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     except ValueError:
         await update.message.reply_text("⚠️ 수량은 1 이상의 정수여야 합니다.")
         return
-    from pending_orders import add_pending_order, list_pending_orders
+    from core.pending_orders import add_pending_order, list_pending_orders
     order_id = add_pending_order("BUY", ticker, code, qty, is_us)
     market_tag = "🇺🇸 미국장" if is_us else "🇰🇷 한국장"
     pending = list_pending_orders()
@@ -740,7 +740,7 @@ async def cmd_sellnext(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     except ValueError:
         await update.message.reply_text("⚠️ 수량은 1 이상의 정수여야 합니다.")
         return
-    from pending_orders import add_pending_order, list_pending_orders
+    from core.pending_orders import add_pending_order, list_pending_orders
     order_id = add_pending_order("SELL", ticker, code, qty, is_us)
     market_tag = "🇺🇸 미국장" if is_us else "🇰🇷 한국장"
     pending = list_pending_orders()
@@ -756,7 +756,7 @@ async def cmd_sellnext(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_pendingorders(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """예약 주문 목록 조회."""
-    from pending_orders import list_pending_orders, remove_pending_order
+    from core.pending_orders import list_pending_orders, remove_pending_order
     args = ctx.args
     if args and args[0].lower() == "cancel" and len(args) > 1:
         ok = remove_pending_order(args[1])
@@ -784,7 +784,7 @@ async def cmd_pendingorders(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def cmd_portfolio(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("⏳ 포트폴리오 현황 조회 중...")
     try:
-        from paper_trader import _load, POS_PATH
+        from core.paper_trader import _load, POS_PATH
         from config import REV_SLOTS, TR_SLOTS
         positions = _load(POS_PATH, {})
         rev_pos = [p for p in positions.values() if p.get("agent") == "reversion"]
@@ -818,12 +818,12 @@ async def cmd_scanstocks(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         def _scan():
             from signals.scanner import scan_all
             from config import KIS_APP_KEY
-            from data_fetcher import fetch_ohlcv
+            from data.data_fetcher import fetch_ohlcv
 
             growth_cash = 10_000_000  # 시뮬레이션 기본값
             if KIS_APP_KEY:
                 try:
-                    from trader import KISTrader
+                    from core.trader import KISTrader
                     t = KISTrader()
                     cash = t.get_available_cash()
                     balance = t.get_balance()
@@ -868,7 +868,7 @@ async def cmd_buysignal(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         growth_cash = 10_000_000
         if KIS_APP_KEY:
-            from trader import KISTrader
+            from core.trader import KISTrader
             t = KISTrader()
             cash = t.get_available_cash()
             balance = t.get_balance()
@@ -888,7 +888,7 @@ async def cmd_buysignal(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         stock_code = ticker.replace(".KS", "").replace(".KQ", "")
 
         if KIS_APP_KEY:
-            from trader import KISTrader
+            from core.trader import KISTrader
             t = KISTrader()
             if is_us:
                 t.buy_us(stock_code, qty)
@@ -896,7 +896,7 @@ async def cmd_buysignal(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 t.buy(stock_code.replace(".", ""), qty)
 
         from signals.alert import build_buy_confirm_message
-        from trade_logger import log_buy
+        from core.trade_logger import log_buy
         log_buy(ticker, signal.get("name", ticker), price, qty, strategy="ML급등주")
         msg = build_buy_confirm_message(signal, qty, price)
         await update.message.reply_text(msg, parse_mode="HTML")
@@ -920,7 +920,7 @@ async def cmd_skipsignal(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 # /tradestats — 매매 이력 통계
 # ─────────────────────────────────────────────
 async def cmd_tradestats(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    from trade_logger import format_stats_message, _send_csv_to_telegram
+    from core.trade_logger import format_stats_message, _send_csv_to_telegram
     await update.message.reply_text(format_stats_message(), parse_mode="HTML")
     _send_csv_to_telegram("📎 전체 매매 이력")
 
@@ -938,7 +938,7 @@ async def cmd_backtest(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     try:
         result = await loop.run_in_executor(
             None,
-            lambda: __import__("backtest_ml").run_backtest(stocks)
+            lambda: __import__("backtest.backtest_ml", fromlist=["run_backtest"]).run_backtest(stocks)
         )
         if len(result) > 4000:
             for i in range(0, len(result), 4000):
@@ -995,8 +995,8 @@ async def callback_buy_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     if data.startswith("buy_confirm_"):
         conf_id = data[len("buy_confirm_"):]
-        from pending_confirmations import get_confirmation, remove_confirmation
-        from pending_orders import add_pending_order
+        from core.pending_confirmations import get_confirmation, remove_confirmation
+        from core.pending_orders import add_pending_order
 
         conf = get_confirmation(conf_id)
         if not conf:
@@ -1021,7 +1021,7 @@ async def callback_buy_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     elif data.startswith("buy_cancel_"):
         conf_id = data[len("buy_cancel_"):]
-        from pending_confirmations import get_confirmation, remove_confirmation
+        from core.pending_confirmations import get_confirmation, remove_confirmation
 
         conf = get_confirmation(conf_id)
         if conf:

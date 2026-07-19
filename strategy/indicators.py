@@ -3,6 +3,9 @@ indicators.py - 기술적 지표 계산 (이동평균, RSI, 거래량 보정, MA
 ta 라이브러리 활용 (Python 3.9 호환)
 """
 
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))  # repo-root: 하위 폴더에서 직접 실행 대비
+
 import pandas as pd
 import ta
 from datetime import datetime
@@ -148,7 +151,7 @@ def is_volume_decreasing_trend(volume_series: list, days: int = 3) -> bool:
 
 
 if __name__ == "__main__":
-    from data_fetcher import fetch_ohlcv
+    from data.data_fetcher import fetch_ohlcv
     df = fetch_ohlcv("005930.KS", period_years=1)
     df = add_all_indicators(df)
     df = detect_crossover(df)

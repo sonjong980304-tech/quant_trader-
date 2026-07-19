@@ -288,7 +288,7 @@ def _get_sector_map(tickers: list[str] | None = None) -> dict[str, str]:
 
     # ── KIS API 조회 ──────────────────────────────────────────────────────────
     try:
-        from trader import KISTrader
+        from core.trader import KISTrader
         kis = KISTrader()
     except Exception as e:
         logger.error("KISTrader 초기화 실패: %s → 섹터 데이터 없음", e)

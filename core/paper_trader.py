@@ -34,7 +34,7 @@ META_PATH       = os.path.join(_BASE_DIR, "paper_meta.json")
 SNAPSHOT_PATH   = os.path.join(_BASE_DIR, "paper_params_snapshot.json")
 
 # ─── 백테스트 공유 비용 함수 (별도 구현 금지) ────────────────────────────────
-from backtest_walkforward import _apply_costs as _bt_apply_costs
+from backtest.backtest_walkforward import _apply_costs as _bt_apply_costs
 
 # ─── config에서 파라미터 로드 ────────────────────────────────────────────────
 from config import (
@@ -276,7 +276,7 @@ def evaluate_positions(price_map: dict[str, float], trade_day: bool = True,
                 logger.warning("[Paper][%s] 비정상 가격 변동 감지(%+.1f%%) — 액면분할/데이터 이상 의심, 자동청산 보류",
                                ticker, change_pct)
                 try:
-                    from notifier import send_telegram
+                    from interface.notifier import send_telegram
                     send_telegram(
                         f"⚠️ <b>[페이퍼] {pos['name']}({ticker})</b>\n"
                         f"진입가 대비 {change_pct:+.1f}% — 액면분할/데이터 오류 의심\n"
@@ -385,7 +385,7 @@ def evaluate_positions_auto(trade_day: bool = False) -> list[dict]:
     _kis = None
     if KIS_APP_KEY:
         try:
-            from trader import KISTrader
+            from core.trader import KISTrader
             _kis = KISTrader()
         except Exception:
             pass
@@ -421,7 +421,7 @@ def evaluate_positions_auto(trade_day: bool = False) -> list[dict]:
         # add_features는 ma20/adx 컬럼을 생성하지 않아 evaluate_positions의 MA20/ADX
         # 청산이 발동하지 못한다(죽은 코드). ma20·adx·atr를 만드는
         # trend_agent.compute_indicators로 교체해 백테스트와 청산 로직을 일치시킨다.
-        from trend_agent import compute_indicators as _ti_compute
+        from strategy.trend_agent import compute_indicators as _ti_compute
         for tkr in trend_tickers:
             try:
                 raw_df = yf.download(tkr, period="3mo", interval="1d",
@@ -436,7 +436,7 @@ def evaluate_positions_auto(trade_day: bool = False) -> list[dict]:
     closed = evaluate_positions(price_map, trade_day=trade_day, df_map=df_map)
     if closed:
         try:
-            from notifier import send_telegram
+            from interface.notifier import send_telegram
             for c in closed:
                 send_telegram(
                     f"📋 <b>[페이퍼 청산]</b> {c['name']}({c['ticker']})\n"
@@ -463,7 +463,7 @@ def log_auc(fold_id: int | str, auc: float):
     if auc < 0.50:
         logger.warning("[Paper] AUC 역방향 경고: fold=%s AUC=%.3f", fold_id, auc)
         try:
-            from notifier import send_telegram
+            from interface.notifier import send_telegram
             send_telegram(
                 f"⚠️ <b>[페이퍼] 레짐 AUC 역방향</b>\n"
                 f"fold={fold_id}  AUC={auc:.3f}\n"
@@ -600,7 +600,7 @@ def check_circuit_breaker(market: str | None = None) -> tuple[bool, str]:
 def _alert_circuit_breaker(reason: str, market: str | None = None):
     label = f"[페이퍼/{market}]" if market else "[페이퍼]"
     try:
-        from notifier import send_telegram
+        from interface.notifier import send_telegram
         send_telegram(
             f"🚨 <b>{label} Circuit Breaker 발동</b>\n\n"
             f"사유: {reason}\n\n"
@@ -806,7 +806,7 @@ def daily_report(market: str | None = None) -> str:
                 from config import KIS_APP_KEY
                 cur = 0.0
                 if KIS_APP_KEY:
-                    from trader import KISTrader
+                    from core.trader import KISTrader
                     _kt = KISTrader()
                     _tk = pos["ticker"]
                     if _tk.endswith(".KS") or _tk.endswith(".KQ"):
@@ -858,7 +858,7 @@ def daily_report(market: str | None = None) -> str:
     report = "\n".join(l for l in lines if l is not None)
 
     try:
-        from notifier import send_telegram
+        from interface.notifier import send_telegram
         send_telegram(report)
     except Exception as e:
         logger.warning("[Paper] 일일 리포트 전송 실패: %s", e)
@@ -955,7 +955,7 @@ def register_logic_change(reason: str):
 
     logger.warning("[Paper] 로직 변경 등록 — 카운트 리셋 (이전 시작일: %s): %s", old_start, reason)
     try:
-        from notifier import send_telegram
+        from interface.notifier import send_telegram
         send_telegram(
             f"⚠️ <b>[페이퍼] 로직 변경 등록</b>\n"
             f"사유: {reason}\n"
@@ -990,7 +990,7 @@ def update_entry_prices(market: str) -> list[str]:
     if market == "KR":
         try:
             from config import KIS_APP_KEY
-            from trader import KISTrader
+            from core.trader import KISTrader
             if KIS_APP_KEY:
                 t = KISTrader()
                 for ticker in tickers:
@@ -1081,7 +1081,7 @@ def update_entry_prices(market: str) -> list[str]:
         _save(POS_PATH, positions)
         _save(TRADES_PATH, trades)
         try:
-            from notifier import send_telegram
+            from interface.notifier import send_telegram
             send_telegram(
                 f"📌 <b>[페이퍼/{market}] 시초가 진입 확정</b>\n"
                 + "\n".join(f"  • {u}" for u in updated)
@@ -1124,7 +1124,7 @@ def weekly_summary() -> str:
     lines.extend(_agent_slot_summary(positions))
 
     try:
-        from notifier import send_telegram
+        from interface.notifier import send_telegram
         send_telegram("\n".join(l for l in lines if l))
     except Exception:
         pass

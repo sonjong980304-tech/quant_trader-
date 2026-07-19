@@ -13,11 +13,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 # ─── 외부 의존성 모킹 ───────────────────────────────────────────────────────
 
-_mock_notifier = types.ModuleType("notifier")
+_mock_notifier = types.ModuleType("interface.notifier")
 _mock_notifier.send_telegram = lambda msg: True
-sys.modules["notifier"] = _mock_notifier
+sys.modules["interface.notifier"] = _mock_notifier
 
-_mock_trader = types.ModuleType("trader")
+_mock_trader = types.ModuleType("core.trader")
 class _MockKISTrader:
     def get_balance(self): return []
     def get_current_price(self, code): return {"price": 0.0}
@@ -25,13 +25,13 @@ class _MockKISTrader:
     def sell_us(self, code, qty): pass
 _mock_trader.KISTrader = _MockKISTrader
 _mock_trader.positions = {}
-sys.modules["trader"] = _mock_trader
+sys.modules["core.trader"] = _mock_trader
 
-_mock_pt = types.ModuleType("paper_trader")
+_mock_pt = types.ModuleType("core.paper_trader")
 _mock_pt.evaluate_positions_auto = lambda: None
-sys.modules["paper_trader"] = _mock_pt
+sys.modules["core.paper_trader"] = _mock_pt
 
-import position_manager as pm
+import core.position_manager as pm
 
 
 # ─── fixtures ──────────────────────────────────────────────────────────────

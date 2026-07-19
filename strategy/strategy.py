@@ -2,6 +2,9 @@
 strategy.py - Reversion 트리거 탐지 (Mean Reversion ML 신호 생성)
 """
 
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))  # repo-root: 하위 폴더에서 직접 실행 대비
+
 import pandas as pd
 from config import (
     MA_SHORT, MA_LONG,
@@ -59,7 +62,7 @@ def _projected_volume(df: pd.DataFrame) -> pd.Series:
     - 백테스트(과거 데이터) 또는 장 종료 후: 원본 거래량 그대로 반환
     """
     import datetime
-    from indicators import get_elapsed_ratio
+    from strategy.indicators import get_elapsed_ratio
 
     vol = df["Volume"].copy().astype(float)
 
@@ -329,8 +332,8 @@ def get_latest_signal(df: pd.DataFrame) -> dict:
 
 
 if __name__ == "__main__":
-    from data_fetcher import fetch_ohlcv
-    from indicators import add_all_indicators, detect_crossover
+    from data.data_fetcher import fetch_ohlcv
+    from strategy.indicators import add_all_indicators, detect_crossover
 
     df = fetch_ohlcv("005930.KS", period_years=1)
     df = add_all_indicators(df)

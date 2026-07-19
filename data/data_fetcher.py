@@ -2,6 +2,9 @@
 data_fetcher.py - yfinance를 이용한 주가 데이터 수집
 """
 
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))  # repo-root: 하위 폴더에서 직접 실행 대비
+
 import time
 import yfinance as yf
 import pandas as pd
@@ -87,7 +90,7 @@ def get_minute_data(ticker: str, interval_min: int = 1) -> pd.DataFrame:
     기존 trader.py의 KIS API 토큰/헤더 방식 그대로 재사용.
     """
     import requests
-    from trader import KISTrader
+    from core.trader import KISTrader
     from config import KIS_BASE_URL
 
     stock_code = ticker.replace(".KS", "").replace(".KQ", "")
