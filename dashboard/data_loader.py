@@ -211,14 +211,14 @@ def paper_ev_curve(df: pd.DataFrame) -> pd.DataFrame:
     return closed[["청산시각", "name", "ticker", "net_pnl_pct", "EV"]]
 
 
-_AGENTS = ["trend", "reversion"]
+_AGENTS = ["trend", "reversion", "kospi200_xgb"]
 
 
 def paper_agent_perf(df: pd.DataFrame) -> pd.DataFrame:
     """
-    에이전트(trend/reversion)별 성과: 평균수익률·승률·거래수.
+    에이전트(trend/reversion/kospi200_xgb)별 성과: 평균수익률·승률·거래수.
     거래 기록이 아직 없는 에이전트(예: trend 슬롯 미체결)도 0으로 채워
-    항상 두 에이전트가 함께 표시되게 한다.
+    항상 세 에이전트가 함께 표시되게 한다.
     """
     base = pd.DataFrame({"에이전트": _AGENTS})
     closed = df[df["status"] == "closed"].copy() if not df.empty else df

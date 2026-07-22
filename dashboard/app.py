@@ -114,7 +114,9 @@ def _render_paper_tab(df: pd.DataFrame, key_prefix: str):
         # ── 전종목 신호 테이블 ────────────────────────────────────────
         st.subheader("📋 전종목 신호")
 
-        # AUC는 모델 메타에서(G1), trend은 win_prob N/A(G3)
+        # AUC는 모델 메타에서(G1), trend·kospi200_xgb는 win_prob 개념이 없어 N/A(G3)
+        # (kospi200_xgb는 회귀+랭킹 모델이라 AUC 대신 IC를 쓰지만 이 컬럼은 AUC 전용 — get_model_auc가
+        #  ic만 있는 메타에서 auc 키를 못 찾아 None을 주므로 자연스럽게 N/A로 표시됨)
         auc_map = {a: dl.get_model_auc(a) for a in df["agent"].unique()}
 
         # 오픈 포지션 향후수익률 = 현재가 평가(라이브), 청산은 net_pnl_pct
@@ -133,7 +135,7 @@ def _render_paper_tab(df: pd.DataFrame, key_prefix: str):
             "에이전트": df["agent"],
             "트리거": df["trigger_str"],
             "win_prob": df.apply(
-                lambda r: "N/A" if r["agent"] == "trend"
+                lambda r: "N/A" if r["agent"] in ("trend", "kospi200_xgb")
                 else (f"{r['win_prob']*100:.1f}%" if pd.notna(r["win_prob"]) else "-"),
                 axis=1,
             ),
