@@ -1,11 +1,13 @@
 """
-runner.py - Reversion + Trend 슬롯분리 전략 스케줄러
+runner.py - Reversion + Trend + KOSPI200 XGB 랭킹 슬롯분리 전략 스케줄러
 
 스케줄:
-  07:30   → retrain_kr_models()
+  07:30   → retrain_kr_models() : reversion 분기(1/4/7/10월) 재학습. kospi200_xgb는 분기가 아니라
+            40거래일 리밸런싱 시점마다 scan_kospi200_signals_eod()가 직접 재학습을 트리거한다.
   08:00   → send_morning_briefing()
   09:00   → execute_pending_orders("KR")
-  15:31   → scan_growth_signals_eod() : KR EOD ML 신호 스캔 → 익일 시초가 매수
+  15:31   → scan_growth_signals_eod() : KR EOD ML 신호 스캔(reversion+trend) → 익일 시초가 매수
+  15:32   → scan_kospi200_signals_eod() : 보유 포지션 0개일 때만 재학습(IC 낮으면 롤백)→스캔 → 익일 시초가 매수
 """
 
 import schedule
@@ -550,6 +552,137 @@ def scan_growth_signals_eod():
 
 
 # ─────────────────────────────────────────────
+# KOSPI200 XGB 랭킹 신호 스캔 (15:32) — 3번째 에이전트
+# ─────────────────────────────────────────────
+
+def scan_kospi200_signals_eod():
+    """
+    15:32 실행 — kospi200_xgb 보유 포지션이 0개일 때만(직전 코호트 전량청산 완료) 재학습+스캔한다.
+    HOLD=REBAL_FREQ=40거래일(그리드서치로 확정, config.KOSPI200_HOLD)로 코호트가 겹치지 않으므로,
+    "슬롯 0개" 조건 하나로 40거래일 주기 리밸런싱을 구현한다(별도 상태 파일 불필요).
+
+    재학습은 reversion처럼 분기 캘린더가 아니라 이 리밸런싱 시점마다(매 40거래일) 직전 호출해
+    최신 데이터까지 포함해 다시 학습한다 — IC가 기존보다 낮으면 자동 롤백(ml/kospi200_trainer.py).
+    """
+    if not _check_activation():
+        return
+    if not is_kr_trading_day(datetime.now(KST).date()):
+        return
+
+    from config import KOSPI200_SLOTS, KOSPI200_HOLD
+    from core.paper_trader import (
+        can_add_position, is_circuit_breaker_active, log_paper_signal,
+        _load as _pt_load, POS_PATH as _PT_POS,
+    )
+
+    _paper_pos = _pt_load(_PT_POS, {})
+    _kx_open = sum(1 for p in _paper_pos.values() if p.get("agent") == "kospi200_xgb")
+    if _kx_open > 0:
+        logger.debug("[KOSPI200] 보유 포지션 %d건 — 코호트 청산 대기 중(리밸런싱 스킵)", _kx_open)
+        return
+    if is_circuit_breaker_active():
+        logger.info("[KOSPI200] Circuit Breaker 활성 — 스캔 스킵")
+        return
+
+    # 리밸런싱 시점(포지션 0개) — 스캔 전에 최신 데이터까지 포함해 먼저 재학습.
+    # 실패해도 기존 모델로 스캔은 계속 진행(재학습 오류가 매매 자체를 막지 않게).
+    logger.info("[KOSPI200] 리밸런싱 시점 재학습 시작")
+    try:
+        from ml.kospi200_trainer import retrain_kospi200_global
+        kx_metrics = retrain_kospi200_global()
+        if kx_metrics:
+            tag = "롤백(기존 모델 유지)" if kx_metrics.get("rolled_back") else "신규 모델 채택"
+            old_ic = kx_metrics.get("old_ic")
+            logger.info("[KOSPI200] 재학습 완료 IC=%.4f(기존=%s) — %s",
+                       kx_metrics["ic"], f"{old_ic:.4f}" if old_ic is not None else "없음", tag)
+            send_telegram(
+                f"🤖 <b>KOSPI200 XGB 리밸런싱 재학습 완료</b> — {tag}\n"
+                f"IC={kx_metrics['ic']:.4f}"
+                f"{f' (기존 {old_ic:.4f})' if old_ic is not None else ''}"
+            )
+        else:
+            logger.warning("[KOSPI200] 재학습 실패 — 기존 모델로 스캔 계속")
+    except Exception as e:
+        logger.warning("[KOSPI200] 재학습 오류(기존 모델로 스캔 계속): %s", e)
+
+    logger.info("[KOSPI200] 코호트 형성 스캔 시작 (슬롯 0/%d)", KOSPI200_SLOTS)
+    try:
+        from strategy.kospi200_agent import build_today_ranking
+        top = build_today_ranking(top_n=KOSPI200_SLOTS)
+    except Exception as e:
+        logger.warning("[KOSPI200] 스캔 실패: %s", e)
+        return
+    if top is None or top.empty:
+        logger.info("[KOSPI200] 예측 결과 없음 — 스캔 스킵")
+        return
+    logger.info("[KOSPI200] 코호트 %d종목 선정", len(top))
+
+    total_asset = 0.0
+    if KIS_APP_KEY:
+        try:
+            total_asset = _get_total_asset(KISTrader())
+        except Exception:
+            pass
+    growth_cash   = total_asset if total_asset > 0 else 10_000_000
+    per_slot_cash = growth_cash / KOSPI200_SLOTS
+
+    from data.data_fetcher import fetch_ohlcv
+    for code, row in top.iterrows():
+        if not can_add_position("kospi200_xgb"):
+            logger.info("[KOSPI200] 슬롯 소진 — 나머지 종목 스킵")
+            break
+
+        ticker = f"{code}.KS"
+        pred   = float(row["pred"])
+        close  = None
+        try:
+            _df = fetch_ohlcv(ticker, period_years=1)
+            if _df is not None and len(_df):
+                close = float(_df["Close"].iloc[-1])
+        except Exception:
+            pass
+        if not close or close <= 0:
+            logger.warning("[KOSPI200] 종가 조회 실패 — 스킵: %s", ticker)
+            continue
+
+        if not LIVE_TRADING:
+            log_paper_signal(
+                ticker        = ticker,
+                name          = ticker,
+                agent         = "kospi200_xgb",
+                trigger_types = ["kospi200_rank"],
+                entry_price   = None,
+                eod_close     = close,
+            )
+            logger.info("[KOSPI200] 페이퍼 신호: %s pred=%.4f", ticker, pred)
+            send_telegram(
+                f"📊 [페이퍼/KOSPI200] <b>{ticker}</b>\n"
+                f"예측점수={pred:.4f} | 코호트 균등매수(1/{KOSPI200_SLOTS})\n"
+                f"익일 09:00 시초가 매수 예약 · {KOSPI200_HOLD}거래일 보유 후 전량매도"
+            )
+        else:
+            from core.pending_confirmations import add_confirmation
+            from interface.notifier import send_buy_confirmation_keyboard
+            qty     = max(1, int(per_slot_cash / close))
+            conf_id = add_confirmation(
+                ticker  = ticker,
+                name    = ticker,
+                qty     = qty,
+                code    = code,
+                is_us   = False,
+                ml_meta = {"agent": "kospi200_xgb", "pred": pred,
+                          "avg_win": 0.0, "avg_loss": 0.0, "win_prob": 0.0, "is_us": False},
+                note    = f"KOSPI200 랭킹 신호 | pred={pred:.4f}",
+            )
+            send_buy_confirmation_keyboard(
+                f"🔔 [KOSPI200 랭킹] <b>{ticker}</b>\n"
+                f"예측점수={pred:.4f} | 수량 {qty}주\n"
+                f"익일 09:00 시초가 매수 예약 — 확인하시겠습니까?",
+                conf_id,
+            )
+
+
+# ─────────────────────────────────────────────
 # US EOD 신호 스캔 (미국 장 마감 직후)
 # ─────────────────────────────────────────────
 
@@ -1040,6 +1173,8 @@ def main():
 
     # EOD 신호 스캔 15:31 — Close 확정 후 EOD 일봉 기준 신호 → 익일 시초가 예약 (GATE B)
     schedule.every().day.at("15:31").do(scan_growth_signals_eod)
+    # KOSPI200 XGB 랭킹 스캔 15:32 — reversion/trend 스캔 뒤 이어서. 보유 포지션 0개일 때만 실행.
+    schedule.every().day.at("15:32").do(scan_kospi200_signals_eod)
 
     # ML 포지션 자동 청산 (익절 / 7거래일 강제)
     schedule.every(5).minutes.do(check_ml_positions)
@@ -1052,9 +1187,9 @@ def main():
     )
 
     logger.info(
-        "등록 완료: 07:30 KR재학습(분기별 1/4/7/10월) / 08:00 모닝브리핑 / "
-        "15:30 KR EOD평가 / 15:35 KR페이퍼 / 15:40 뉴스브리핑(저녁) / "
-        "5분 ML+페이퍼TP/SL / 매월 1일 08:30 리밸런싱"
+        "등록 완료: 07:30 KR재학습(분기별 1/4/7/10월, reversion+kospi200_xgb) / 08:00 모닝브리핑 / "
+        "15:30 KR EOD평가 / 15:31 reversion+trend 스캔 / 15:32 kospi200_xgb 스캔(슬롯0일때만) / "
+        "15:35 KR페이퍼 / 15:40 뉴스브리핑(저녁) / 5분 ML+페이퍼TP/SL / 매월 1일 08:30 리밸런싱"
     )
 
     while True:

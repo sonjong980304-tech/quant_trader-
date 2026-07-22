@@ -141,7 +141,18 @@ EOD_HORIZON          = 10        # reversion 보유기간 (거래일)
 # 슬롯 설정
 REV_SLOTS            = 10        # reversion 전용 슬롯
 TR_SLOTS             = 10        # trend 전용 슬롯
-MAX_TOTAL_SLOTS      = 20        # 총 최대 동시 보유 종목 수
+KOSPI200_SLOTS       = 10        # kospi200_xgb 전용 슬롯
+MAX_TOTAL_SLOTS      = 30        # 총 최대 동시 보유 종목 수
+
+# ─────────────────────────────────────────────
+# kospi200_xgb 에이전트 전용 파라미터 (2026-07-22 채택)
+# ─────────────────────────────────────────────
+# 코스피200 PIT 랭킹 전략 — 그리드서치(quant_trader_backtest_dev)로 HOLD=REBAL_FREQ=40이
+# 전체기간(2015~2026)·2025상반기 절단 비교 양쪽에서 최적(net 샤프 +0.480 / +0.461)임을 확인.
+# HOLD == REBAL_FREQ이므로 코호트가 겹치지 않아 "보유 포지션 0개일 때만 재스캔"으로 리밸런싱
+# 주기를 구현한다(core/paper_trader.py::evaluate_positions, runner.py::scan_kospi200_signals_eod).
+KOSPI200_HOLD         = 40       # 보유기간(거래일) — TP/SL 없이 이 기간 뒤 전량 매도
+KOSPI200_REBAL_FREQ   = 40       # 리밸런싱 주기(거래일, 문서용 — 실제 게이팅은 위 설명대로 슬롯 점유 기반)
 
 # ─────────────────────────────────────────────
 # 실거래 안전 게이트

@@ -41,7 +41,11 @@ from config import (
     PAPER_BACKTEST_EV_KR as PAPER_BACKTEST_EV,
     TP_PCT, SL_PCT, EOD_SLIPPAGE_PCT, EOD_HORIZON,
     REV_SLOTS, TR_SLOTS, SPLIT_GUARD_PCT,
+    KOSPI200_SLOTS, KOSPI200_HOLD,
 )
+
+# 에이전트별 슬롯 한도 (can_add_position/_agent_slot_summary 공용)
+_AGENT_SLOTS = {"reversion": REV_SLOTS, "trend": TR_SLOTS, "kospi200_xgb": KOSPI200_SLOTS}
 PAPER_BACKTEST_EV_US = None  # US 미운용
 
 BACKTEST_EV    = PAPER_BACKTEST_EV    # KR 백테스트 참고 EV
@@ -117,7 +121,7 @@ def _today_kst() -> str:
 def can_add_position(agent: str) -> bool:
     """에이전트별 슬롯 가용 여부 확인"""
     positions = _load(POS_PATH, {})
-    limit = REV_SLOTS if agent == "reversion" else TR_SLOTS
+    limit = _AGENT_SLOTS.get(agent, TR_SLOTS)
     count = sum(1 for p in positions.values() if p.get("agent") == agent)
     return count < limit
 
@@ -313,6 +317,11 @@ def evaluate_positions(price_map: dict[str, float], trade_day: bool = True,
                         reason = "adx"
                         exit_price = cur
             if reason is None and pos["trade_days"] >= 60:
+                reason = "time"
+                exit_price = cur
+        elif agent == "kospi200_xgb":
+            # kospi200_xgb: TP/SL 없음 — 백테스트로 검증된 그대로 순수 고정보유(HOLD=40거래일) 후 전량매도
+            if pos["trade_days"] >= KOSPI200_HOLD:
                 reason = "time"
                 exit_price = cur
         else:
@@ -694,9 +703,11 @@ def _agent_slot_summary(positions: dict) -> list[str]:
     """에이전트별 슬롯 현황 요약 라인 생성."""
     rev_count = sum(1 for p in positions.values() if p.get("agent") == "reversion")
     tr_count  = sum(1 for p in positions.values() if p.get("agent") == "trend")
+    kx_count  = sum(1 for p in positions.values() if p.get("agent") == "kospi200_xgb")
     return [
-        f"  [reversion] {rev_count}건 / 슬롯 {rev_count}/{REV_SLOTS}",
-        f"  [trend]     {tr_count}건 / 슬롯 {tr_count}/{TR_SLOTS}",
+        f"  [reversion]    {rev_count}건 / 슬롯 {rev_count}/{REV_SLOTS}",
+        f"  [trend]        {tr_count}건 / 슬롯 {tr_count}/{TR_SLOTS}",
+        f"  [kospi200_xgb] {kx_count}건 / 슬롯 {kx_count}/{KOSPI200_SLOTS}",
     ]
 
 

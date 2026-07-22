@@ -387,6 +387,102 @@ def train_global(combined_df: pd.DataFrame, agent: str,
     return calibrated_model, metrics
 
 
+def train_global_regression(combined_df: pd.DataFrame, agent: str,
+                            feature_cols: list[str], wf_folds: list[tuple],
+                            embargo_days: int = 0) -> tuple[object, dict]:
+    """
+    회귀 라벨(예: 크로스섹셔널 percentile rank 0~1) 전역 모델 학습.
+
+    train_global()과 동일한 walk-forward + "마지막 fold 모델을 배포 모델로 채택" 구조를 쓰지만,
+    XGBRegressor를 쓰고 분류 지표(AUC/accuracy/brier) 대신 IC(Spearman 순위상관)로 평가한다.
+
+    combined_df: "_label"(float, 회귀 타깃), "_date" 컬럼 필수.
+    embargo_days: 각 fold의 학습구간 끝에서 검증 시작 직전 embargo_days 거래일을 제외한다
+                  (라벨이 embargo_days일 뒤를 내다보므로, 이 구간을 학습에 포함하면 라벨 누수).
+    저장: ml/models/_global_{agent}.pkl (load_model()과 호환되는 동일 포맷)
+    """
+    try:
+        import xgboost as xgb
+    except ImportError:
+        raise ImportError("xgboost가 설치되어 있지 않습니다. pip install xgboost")
+
+    combined_df = combined_df.copy()
+    X     = combined_df[feature_cols].values.astype(np.float32)
+    y     = combined_df["_label"].values.astype(np.float32)
+    dates = pd.to_datetime(combined_df["_date"]).dt.tz_localize(None)
+    trading_days = pd.DatetimeIndex(sorted(dates.unique()))
+
+    oof_pred        = np.full(len(X), np.nan)
+    fold_ics        = []
+    last_fold_model = None
+
+    for train_start, train_end, val_end in wf_folds:
+        val_start = train_end
+        cutoff = pd.Timestamp(train_end)
+        if embargo_days > 0:
+            before = trading_days[trading_days < cutoff]
+            if len(before) > embargo_days:
+                cutoff = before[-embargo_days]
+
+        tr_mask = (dates >= pd.Timestamp(train_start)) & (dates < cutoff)
+        vl_mask = (dates >= pd.Timestamp(val_start))   & (dates < pd.Timestamp(val_end))
+        tr_idx, vl_idx = np.where(tr_mask.values)[0], np.where(vl_mask.values)[0]
+
+        if len(tr_idx) < 200 or len(vl_idx) == 0:
+            logger.warning("[global_reg/%s] fold 데이터 부족 train=%d val=%d — 건너뜀",
+                           agent, len(tr_idx), len(vl_idx))
+            continue
+
+        X_tr, X_val = X[tr_idx], X[vl_idx]
+        y_tr, y_val = y[tr_idx], y[vl_idx]
+
+        fold_model = xgb.XGBRegressor(
+            n_estimators=300, max_depth=4, learning_rate=0.05,
+            subsample=0.8, colsample_bytree=0.8, objective="reg:squarederror",
+            random_state=42, verbosity=0,
+        )
+        fold_model.fit(X_tr, y_tr)
+        pred_val = fold_model.predict(X_val)
+        oof_pred[vl_idx] = pred_val
+
+        ic = pd.Series(y_val).corr(pd.Series(pred_val), method="spearman")
+        ic = float(ic) if pd.notna(ic) else 0.0
+        emb = (pd.Timestamp(train_end) - cutoff).days
+        fold_ics.append((f"valid {str(val_start)[:4]}", round(ic, 4)))
+        logger.info("[global_reg/%s] train=%d (embargo %d일) val=%d IC=%.4f",
+                    agent, len(tr_idx), emb, len(vl_idx), ic)
+        last_fold_model = fold_model  # 마지막 fold 모델 보존 (OOS 검증 완료, train_global()과 동일 관례)
+
+    if last_fold_model is None:
+        raise ValueError(f"[global_reg/{agent}] 유효한 fold가 없습니다 — 데이터/wf_folds를 확인하세요")
+
+    valid_mask = ~np.isnan(oof_pred)
+    oof_ic = pd.Series(y[valid_mask]).corr(pd.Series(oof_pred[valid_mask]), method="spearman") if valid_mask.any() else 0.0
+    oof_ic = float(oof_ic) if pd.notna(oof_ic) else 0.0
+
+    fi_pairs = sorted(zip(feature_cols, last_fold_model.feature_importances_),
+                      key=lambda x: x[1], reverse=True)
+    last_fold_ic = float(fold_ics[-1][1]) if fold_ics else oof_ic
+
+    metrics = {
+        "ic":                     round(last_fold_ic, 4),
+        "oof_ic":                 round(oof_ic, 4),
+        "n_samples":              len(X),
+        "feature_cols":           feature_cols,
+        "fold_ics":               fold_ics,
+        "feature_importance_all": fi_pairs,
+        "embargo_days":           embargo_days,
+    }
+
+    path = _model_path("_global", agent)
+    with open(path, "wb") as f:
+        pickle.dump({"model": last_fold_model, "metrics": metrics}, f)
+
+    logger.info("[global_reg/%s] 저장 완료 n=%d IC=%.4f(oof=%.4f)",
+                agent, len(X), last_fold_ic, oof_ic)
+    return last_fold_model, metrics
+
+
 def predict(df: pd.DataFrame, ticker: str, agent: str = "") -> dict:
     """
     최신 바의 피처로 7일 승률 예측.

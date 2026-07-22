@@ -91,13 +91,39 @@ LIVE_TRADING = False  (페이퍼 트레이딩 중)
 - ATR 기반 trailing stop: 2.0×ATR
 - MA20 하향 이탈 시 청산
 
+### 에이전트 3 — KOSPI200 XGB 랭킹 (2026-07-22 추가, 페이퍼 전용)
+
+`quant_trader_backtest_dev`에서 별도 설계·그리드서치로 검증한 크로스섹셔널 랭킹 전략. reversion/trend와
+달리 "매수 판단"이 아니라 "코스피200 안에서 상대적으로 가장 유망한 10종목을 고르는" 랭킹 문제로 접근한다.
+
+- 유니버스: `pykrx.get_index_portfolio_deposit_file`로 조회한 **실제 코스피200 편입종목**(시점별 PIT,
+  생존편향 최소화) — reversion/trend가 쓰는 "실행시점 시총 상위 200 근사"보다 엄밀함.
+- 피처 3개:
+  1. `sector_momentum_zscore` — 20일 모멘텀(종가/20일전 종가−1)을 같은 날·같은 섹터 내에서 z-score화.
+     섹터는 `ml/trainer.py::_get_sector_map()`(KIS API) 재사용.
+  2. `foreigner_institution_flow` — (외국인+기관 순매수)/거래대금근사(거래량×종가)의 5일 이동평균.
+  3. `kospi_realized_vol` — 코스피 지수 20일 일별수익률 표준편차(원값, VKOSPI 미제공으로 대체).
+- 라벨: 7거래일 뒤 수익률의 그날 코스피200 편입종목 내 **크로스섹셔널 percentile rank(0~1)**.
+- 모델: XGBoost 회귀(`ml/model.py::train_global_regression`), Walk-Forward Expanding + embargo 40거래일.
+- 매매: 예측 상위 10종목 균등매수 → **정확히 40거래일 보유 후 전량매도**(TP/SL 없음).
+  HOLD=REBAL_FREQ=40이라 코호트가 겹치지 않아, "보유 포지션 0개일 때만 재스캔"으로 리밸런싱 주기를
+  구현한다(`runner.py::scan_kospi200_signals_eod`, 별도 상태 파일 불필요).
+- 재학습: reversion(분기 캘린더 1/4/7/10월)과 달리 **40거래일 리밸런싱 시점마다** 최신 데이터까지
+  포함해 재학습한다(`ml/kospi200_trainer.py::retrain_kospi200_global`, walk-forward fold가 "오늘"
+  기준 상대 기간으로 매번 새로 계산돼 재학습할수록 학습창이 최신 데이터 쪽으로 밀려 올라간다).
+  새 모델의 IC(정보계수, walk-forward 마지막 fold 기준)가 기존 모델보다 낮으면 **자동 롤백**해
+  기존 모델을 유지한다(reversion의 AUC/avg_win 롤백 게이트와 같은 취지).
+- 현재 `LIVE_TRADING=False`이므로 페이퍼 신호만 기록 — 실거래 확인 경로(`add_confirmation`)는
+  reversion/trend와 동일 패턴으로 이미 구현돼 있고, 플래그 전환 시 그대로 활성화된다.
+
 ### 포트폴리오 운용
 
-- 슬롯 분리: reversion 10 / trend 10 (서로 침범 불가)
-- 포지션 사이징: 하프켈리 + ATR (각 에이전트별 독립 계산)
+- 슬롯 분리: reversion 10 / trend 10 / kospi200_xgb 10 (서로 침범 불가)
+- 포지션 사이징: reversion·trend는 하프켈리+ATR, kospi200_xgb는 코호트 균등가중(1/10)
 - 최대 1종목 비중: 20%
 - 레짐 필터: trend 에이전트 전용 — KOSPI 종가 > MA200 **AND** 20일 고점 대비 낙폭 > -5%일 때만 진입 (2026-07-09 급락 대응 강화, 아래 "페이퍼 테스트 1차 결과" 참조)
   (reversion 에이전트는 하락장에서도 과매도 반등 포착 목적으로 레짐 필터 없음 / SL -8% 자체 손절로 하방 리스크 관리)
+  (kospi200_xgb는 백테스트로 검증된 설계 그대로 레짐 필터·TP/SL 없이 순수 고정보유)
 
 ---
 
@@ -114,6 +140,15 @@ LIVE_TRADING = False  (페이퍼 트레이딩 중)
 
 - Jegadeesh & Titman (1993), "Returns to Buying Winners and Selling Losers", Journal of Finance — 모멘텀 전략 수익성 최초 실증.
 - Moskowitz, Ooi & Pedersen (2012) — 추세 추종 형성/보유 기간 최적화 연구.
+
+### KOSPI200 XGB 랭킹
+
+- Jegadeesh & Titman (1993) — 섹터 내부 상대모멘텀(sector_momentum_zscore)의 근거가 되는 모멘텀 효과.
+- 외국인·기관 수급 쏠림이 단기 초과수익과 관련된다는 국내 실증 다수 — foreigner_institution_flow 피처 근거.
+- 변동성 국면(realized vol)에 따라 팩터 수익률이 달라진다는 조건부 팩터 문헌 — kospi_realized_vol을
+  z-score가 아닌 원값으로 모델에 직접 투입해 "국면 정보"로 활용(VKOSPI 미제공으로 실현변동성 대체).
+- López de Prado (2018) — Walk-Forward + Embargo 방법론(라벨이 미래를 내다보는 만큼 학습/검증 경계에
+  거래일 갭을 둬 라벨 누수 방지) 재사용.
 
 ---
 
@@ -192,6 +227,38 @@ LIVE_TRADING = False  (페이퍼 트레이딩 중)
 
 > 수익률의 크기보다 **편향을 발견하고 정량적으로 보정한 과정**이 이 시스템의 핵심 신뢰성 근거입니다.
 > 보정 후 연평균 수익률 ~+20%, 샤프 1.04가 현실적 기대치입니다.
+
+---
+
+## KOSPI200 XGB 랭킹 — 그리드서치 결과 (`quant_trader_backtest_dev`, 2026-07-22)
+
+보유기간(HOLD)·리밸런싱 주기(REBAL_FREQ)를 5~60거래일로 그리드서치. 두 값을 동일하게(코호트
+비겹침) 맞춘 조합이 전 구간에서 우세했다. 비용 왕복 0.46% 반영(net).
+
+| HOLD/REBAL | net 샤프 | net 총수익(2015~2026) |
+|---:|---:|---:|
+| 5일 | -0.464 | -76.86% |
+| 7일(원안) | -0.097 | -41.17% |
+| 20일 | +0.226 | +32.85% |
+| 30일 | +0.372 | +96.85% |
+| **40일(채택)** | **+0.480** | **+159.98%** |
+| 60일 | +0.438 | +131.68% |
+
+HOLD=40에서 정점을 찍고 60일에서는 소폭 하락 — 40거래일을 최적점으로 채택(`config.KOSPI200_HOLD`).
+
+**2015~2025년 상반기로 절단해 비교(2025하반기~2026 이례적 코스피 폭등장 제외)한 결과:**
+
+| | 총수익 | 샤프 |
+|---|---:|---:|
+| 코스피 buy&hold(동기간) | +59.45% | 0.354 |
+| 원안(HOLD=7) | -41.52% | -0.138 |
+| **채택안(HOLD=40)** | **+120.70%** | **+0.461** |
+
+전체기간(2015~2026) 기준으로는 코스피(샤프 0.787)를 못 이기지만, 그 초과성과 대부분이 2025년
+하반기~2026년의 이례적 폭등장 한 구간에 몰려있어 — **그 구간을 뺀 "평상시" 구간에서는 전략이
+코스피를 총수익·샤프 모두 앞선다.** 즉 이 전략은 평상시엔 코스피 대비 우위가 있으나 극단적
+폭등장은 따라가지 못하는 특성으로 해석된다. 표본이 아직 충분히 길지 않으므로(2011~2014 워밍업
+포함 15년치 검증이지만 40거래일 홀드라 코호트 수 자체는 적음) 페이퍼 트레이딩으로 추가 검증한다.
 
 ---
 
@@ -289,12 +356,13 @@ b = 평균 수익 / 평균 손실 (손익비)
 
 | 시간 | 동작 |
 |------|------|
-| 07:30 (1/4/7/10월 1일 또는 직후 첫 영업일) | **분기별 ML 모델 재학습** — Expanding Window + PIT 시총 상위 200 유니버스 (reversion XGBoost만 재학습, trend는 규칙 기반) |
+| 07:30 (1/4/7/10월 1일 또는 직후 첫 영업일) | **분기별 ML 모델 재학습** — reversion XGBoost(Expanding Window + PIT 시총 상위 200). trend는 규칙 기반이라 재학습 없음. kospi200_xgb는 분기가 아니라 15:32 리밸런싱 시점마다 별도 재학습(아래 참조) |
 | 08:00 (영업일) | 모닝 브리핑 — AI 시황 + 뉴스 |
 | 09:00 (영업일) | KR 예약 주문 실행 — EOD 신호 기반 익일 시초가 매수 |
 | **09:05 (영업일)** | **KR 페이퍼 시초가 확정** — `update_entry_prices("KR")` |
-| 5분 간격 (장중) | ML 포지션 익절·손절·강제 청산 체크 + 페이퍼 TP/SL 평가 |
-| **15:31 (영업일)** | **EOD 신호 스캔** — Close 확정 후 완성 일봉으로 신호 탐지 → 익일 시초가 예약 |
+| 5분 간격 (장중) | ML 포지션 익절·손절·강제 청산 체크 + 페이퍼 TP/SL 평가(kospi200_xgb 40거래일 만기 포함) |
+| **15:31 (영업일)** | **EOD 신호 스캔** — Close 확정 후 완성 일봉으로 신호 탐지(reversion+trend) → 익일 시초가 예약 |
+| **15:32 (영업일)** | **KOSPI200 XGB 랭킹 재학습+스캔** — kospi200_xgb 보유 포지션 0개일 때만(코호트 청산 완료 후) 최신 데이터로 재학습(IC 낮으면 롤백) → 상위 10종목 스캔 |
 | **15:30 (영업일)** | **KR EOD 평가** — trade_days+1 + TP/SL 체크 |
 | **15:35 (매일)** | **KR 페이퍼 트레이딩 일일 리포트** (텔레그램 전송) |
 | 일요일 20:00 | 페이퍼 트레이딩 주차별 집계 |
@@ -325,7 +393,7 @@ state.json: {"bot_active": true, ...}  →  자동매매 시작
 실거래 전 2주 페이퍼 검증 단계. `LIVE_TRADING=False` 상태에서만 동작하며 실 API 호출 없음.
 
 슬롯 분리 운용
-- reversion 전용 10슬롯 / trend 전용 10슬롯 완전 분리
+- reversion 전용 10슬롯 / trend 전용 10슬롯 / kospi200_xgb 전용 10슬롯 완전 분리
 - `can_add_position(agent)` 함수로 진입 전 슬롯 여유 확인
 
 Circuit Breaker 조건 (P3)
@@ -531,11 +599,13 @@ quant_trader/
 │   ├── strategy.py              # Reversion 트리거 탐지 (신호 생성)
 │   ├── indicators.py            # MA / RSI / 볼린저밴드 등 기술적 지표
 │   ├── trend_agent.py           # Trend Following 에이전트
+│   ├── kospi200_agent.py        # KOSPI200 XGB 랭킹 에이전트 (피처 계산 + 예측)
 │   ├── market_regime.py         # KOSPI 시장 레짐 필터
 │   └── market_calendar.py       # KRX 영업일 캐시
 │
 ├── data/                        # 시세 · 재무 · 뉴스 수집
 │   ├── data_fetcher.py          # yfinance 일봉 + KIS 분봉
+│   ├── kospi200_data.py         # 코스피200 PIT 편입종목 + 투자자별 순매수 (pykrx)
 │   ├── naver_finance.py         # 네이버 증권 재무지표 스크래핑
 │   └── news_fetcher.py          # 네이버 뉴스 API
 │
@@ -560,10 +630,11 @@ quant_trader/
 │
 ├── ml/                          # 머신러닝
 │   ├── features.py              # 피처 엔지니어링 + Triple-Barrier 라벨링
-│   ├── model.py                 # XGBoost 학습 · 예측
+│   ├── model.py                 # XGBoost 학습 · 예측 (train_global: 분류 / train_global_regression: 회귀)
 │   ├── regime_model.py          # 레짐 판정 모델
-│   ├── trainer.py               # KRX 유니버스 병렬 재학습
-│   └── models/                  # {ticker}_momentum.pkl / {ticker}_reversion.pkl
+│   ├── trainer.py               # KRX 유니버스 병렬 재학습 (reversion/trend + 섹터맵 _get_sector_map)
+│   ├── kospi200_trainer.py      # kospi200_xgb 전역 회귀모델 재학습 (`python -m ml.kospi200_trainer`)
+│   └── models/                  # {ticker}_momentum.pkl / {ticker}_reversion.pkl / _global_kospi200_xgb.pkl
 │
 ├── news_briefing/               # 뉴스 브리핑 파이프라인 (수집→선별→작성→검증)
 │   └── service.py               # run_morning / run_evening 진입점 (외 11개 모듈)
