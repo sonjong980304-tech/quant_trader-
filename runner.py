@@ -24,7 +24,7 @@ import yfinance as yf
 
 from config import (
     STOCKS, KIS_APP_KEY,
-    LIVE_TRADING,
+    LIVE_TRADING, REVERSION_TREND_SCAN_ENABLED,
 )
 from core.position_manager import (
     _load_state, _check_activation, is_bot_active,
@@ -328,6 +328,10 @@ def scan_growth_signals_eod():
         return
     if not is_kr_trading_day(datetime.now(KST).date()):
         return
+    if not REVERSION_TREND_SCAN_ENABLED:
+        logger.info("[reversion+trend] REVERSION_TREND_SCAN_ENABLED=False — 신규 스캔 중단"
+                    "(기존 포지션은 evaluate_positions_auto가 계속 자연청산)")
+        return
 
     logger.info("EOD 신호 스캔 시작 (15:31)")
 
@@ -571,7 +575,7 @@ def scan_kospi200_signals_eod():
 
     from config import KOSPI200_SLOTS, KOSPI200_HOLD
     from core.paper_trader import (
-        can_add_position, is_circuit_breaker_active, log_paper_signal,
+        can_add_position, log_paper_signal,
         _load as _pt_load, POS_PATH as _PT_POS,
     )
 
@@ -580,9 +584,9 @@ def scan_kospi200_signals_eod():
     if _kx_open > 0:
         logger.debug("[KOSPI200] 보유 포지션 %d건 — 코호트 청산 대기 중(리밸런싱 스킵)", _kx_open)
         return
-    if is_circuit_breaker_active():
-        logger.info("[KOSPI200] Circuit Breaker 활성 — 스캔 스킵")
-        return
+    # 공용 Circuit Breaker(core.paper_trader.check_circuit_breaker)는 EV/CI/연속손실/AUC 등
+    # reversion·trend 자체 실적 기반 지표라 kospi200_xgb와 무관하다(2026-07-22, 사용자 확인).
+    # kospi200_xgb는 여기서 이 게이트를 타지 않고, 자체 안전장치(HOLD=40 고정보유+IC 롤백)만 적용.
 
     # 리밸런싱 시점(포지션 0개) — 스캔 전에 최신 데이터까지 포함해 먼저 재학습.
     # 실패해도 기존 모델로 스캔은 계속 진행(재학습 오류가 매매 자체를 막지 않게).

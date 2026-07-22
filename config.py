@@ -161,6 +161,11 @@ KOSPI200_REBAL_FREQ   = 40       # 리밸런싱 주기(거래일, 문서용 — 
 # 전환 조건: EV>0, CI 하단>0, 슬리피지<0.5%
 LIVE_TRADING = False
 
+# 2026-07-22: kospi200_xgb 검증 기간 동안 reversion/trend 신규 신호를 중단.
+# 이미 열려있는 포지션은 evaluate_positions_auto()가 그대로 TP/SL/만기까지 계속
+# 평가·청산한다(자연청산) — 이 플래그는 scan_growth_signals_eod()의 "신규 스캔"만 막는다.
+REVERSION_TREND_SCAN_ENABLED = False
+
 # ─────────────────────────────────────────────
 # ML / 퀀트 설정
 # ─────────────────────────────────────────────
