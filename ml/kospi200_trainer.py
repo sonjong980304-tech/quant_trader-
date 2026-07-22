@@ -199,24 +199,33 @@ def retrain_kospi200_global() -> dict | None:
     KOSPI200 XGB 랭킹 전역 모델 재학습 — 40거래일 리밸런싱 시점마다(scan_kospi200_signals_eod가
     포지션 0개일 때 직접 호출) 최신 데이터까지 포함해 재학습한다. 분기 캘린더가 아니다.
 
-    IC 기반 롤백: 기존 모델을 백업해두고, 새로 학습한 모델의 IC(마지막 fold)가 기존보다 낮으면
-    새 모델을 버리고 기존 모델을 복원한다(reversion의 AUC/avg_win 롤백과 동일한 취지).
+    IC 기반 롤백: 기존 모델을 백업해두고, 새로 학습한 모델과 기존 모델을 "이번 재학습의
+    동일한 검증구간"에 나란히 재채점해서 비교한다 — 기존 모델의 IC가 더 높으면 새 모델을
+    버리고 기존 모델을 복원한다(reversion의 AUC/avg_win 롤백과 동일한 취지).
 
-    반환 metrics에 old_ic(기존 모델 IC, 최초 학습이면 None), rolled_back(bool) 포함. 실패 시 None.
+    (2026-07-22 수정: 예전에는 "새 모델의 이번 IC" vs "기존 모델의 그때 저장된 IC"를 비교했는데,
+    서로 다른 시기(검증연도)를 비교하는 셈이라 결함이 있었다 — quant_trader_backtest_dev
+    백테스트로 과거 67개 재학습 시점을 재현해보니, 기존 모델이 "동일 구간"에서도 실제로 더
+    나았던 경우는 7.5%(3/40)뿐이었고 나머지 92.5%는 롤백 때문에 더 나은 신규 모델을 계속
+    버리고 있었다. 그래서 기존 모델도 이번 검증구간에 다시 채점해 직접 비교하도록 바꿨다.)
+
+    반환 metrics에 old_ic_stale(기존 모델이 학습 당시 기록한 IC, 참고용), old_ic_same_period
+    (기존 모델을 이번 검증구간에 재채점한 IC, 실제 롤백 판단 기준), rolled_back(bool) 포함.
+    실패 시 None.
     """
     from ml.model import train_global_regression, load_model, _model_path
     from ml.trainer import _get_sector_map
     import shutil
 
-    # 기존 모델 백업 + IC 확보 (롤백 비교용). 최초 학습이면 파일이 없어 old_ic=None.
+    # 기존 모델 백업 + 재채점용 모델 객체 확보. 최초 학습이면 파일이 없어 old_model=None.
     model_path  = _model_path("_global", "kospi200_xgb")
     backup_path = model_path + ".bak"
-    old_ic = None
+    old_model, old_ic_stale = None, None
     if os.path.exists(model_path):
         shutil.copy2(model_path, backup_path)
-        _, old_metrics = load_model("_global", "kospi200_xgb")
-        old_ic = old_metrics.get("ic") if old_metrics else None
-        logger.info("[KOSPI200 재학습] 기존 모델 백업 완료 IC=%s", old_ic)
+        old_model, old_metrics = load_model("_global", "kospi200_xgb")
+        old_ic_stale = old_metrics.get("ic") if old_metrics else None
+        logger.info("[KOSPI200 재학습] 기존 모델 백업 완료 (학습 당시 IC=%s, 참고용)", old_ic_stale)
 
     logger.info("[KOSPI200 재학습] 시작")
     snap, pool = _build_universe()
@@ -270,7 +279,7 @@ def retrain_kospi200_global() -> dict | None:
         return None
 
     try:
-        _, metrics = train_global_regression(
+        _, metrics, (X_val, y_val) = train_global_regression(
             feat, agent="kospi200_xgb",
             feature_cols=FEATURE_COLS,
             wf_folds=_build_wf_folds(), embargo_days=HOLD,
@@ -279,17 +288,30 @@ def retrain_kospi200_global() -> dict | None:
         logger.error("[KOSPI200 재학습] 모델 학습 실패: %s", e)
         return None
 
-    metrics["old_ic"] = old_ic
+    metrics["old_ic_stale"] = old_ic_stale
+    metrics["old_ic_same_period"] = None
     metrics["rolled_back"] = False
-    if old_ic is not None and metrics["ic"] < old_ic:
-        shutil.copy2(backup_path, model_path)
-        metrics["rolled_back"] = True
-        logger.warning("[KOSPI200 재학습] 새 모델 IC(%.4f) < 기존(%.4f) — 롤백, 기존 모델 유지",
-                       metrics["ic"], old_ic)
+    if old_model is not None:
+        # 기존 모델을 "이번 재학습의 검증구간(X_val, y_val)"에 재채점 — 동일 기간 비교
+        old_pred = old_model.predict(X_val)
+        old_ic_same_period = pd.Series(y_val).corr(pd.Series(old_pred), method="spearman")
+        old_ic_same_period = float(old_ic_same_period) if pd.notna(old_ic_same_period) else 0.0
+        metrics["old_ic_same_period"] = old_ic_same_period
+
+        if old_ic_same_period > metrics["ic"]:
+            shutil.copy2(backup_path, model_path)
+            metrics["rolled_back"] = True
+            logger.warning("[KOSPI200 재학습] 기존 모델이 동일구간에서 더 나음(기존=%.4f > 신규=%.4f, "
+                           "기존의 학습당시 stale IC=%s) — 롤백, 기존 모델 유지",
+                           old_ic_same_period, metrics["ic"],
+                           f"{old_ic_stale:.4f}" if old_ic_stale is not None else "없음")
+        else:
+            logger.info("[KOSPI200 재학습] 완료 IC=%.4f(동일구간 재채점한 기존=%.4f, oof=%.4f) n=%d "
+                       "— 신규 모델 채택", metrics["ic"], old_ic_same_period,
+                       metrics["oof_ic"], metrics["n_samples"])
     else:
-        logger.info("[KOSPI200 재학습] 완료 IC=%.4f(기존=%s, oof=%.4f) n=%d — 신규 모델 채택",
-                    metrics["ic"], f"{old_ic:.4f}" if old_ic is not None else "없음(최초학습)",
-                    metrics["oof_ic"], metrics["n_samples"])
+        logger.info("[KOSPI200 재학습] 완료 IC=%.4f(최초학습, oof=%.4f) n=%d",
+                    metrics["ic"], metrics["oof_ic"], metrics["n_samples"])
     return metrics
 
 
@@ -301,6 +323,9 @@ if __name__ == "__main__":
         print("=" * 60)
         print(f"  IC (마지막 fold) : {result['ic']:.4f}")
         print(f"  OOF IC           : {result['oof_ic']:.4f}")
+        print(f"  기존 stale IC    : {result.get('old_ic_stale')}")
+        print(f"  기존 동일구간 IC : {result.get('old_ic_same_period')}")
+        print(f"  롤백 여부        : {result['rolled_back']}")
         print(f"  샘플 수          : {result['n_samples']:,}")
         for fold_label, ic in result["fold_ics"]:
             print(f"  {fold_label}: IC={ic:.4f}")

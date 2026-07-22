@@ -389,7 +389,7 @@ def train_global(combined_df: pd.DataFrame, agent: str,
 
 def train_global_regression(combined_df: pd.DataFrame, agent: str,
                             feature_cols: list[str], wf_folds: list[tuple],
-                            embargo_days: int = 0) -> tuple[object, dict]:
+                            embargo_days: int = 0) -> tuple[object, dict, tuple]:
     """
     회귀 라벨(예: 크로스섹셔널 percentile rank 0~1) 전역 모델 학습.
 
@@ -400,6 +400,9 @@ def train_global_regression(combined_df: pd.DataFrame, agent: str,
     embargo_days: 각 fold의 학습구간 끝에서 검증 시작 직전 embargo_days 거래일을 제외한다
                   (라벨이 embargo_days일 뒤를 내다보므로, 이 구간을 학습에 포함하면 라벨 누수).
     저장: ml/models/_global_{agent}.pkl (load_model()과 호환되는 동일 포맷)
+
+    반환: (model, metrics, last_fold_val) — last_fold_val=(X_val, y_val)은 마지막 fold의
+    검증셋(호출자가 롤백 판단 시 "기존 모델"을 동일 구간에 재채점하는 용도, 저장하지 않음).
     """
     try:
         import xgboost as xgb
@@ -415,6 +418,7 @@ def train_global_regression(combined_df: pd.DataFrame, agent: str,
     oof_pred        = np.full(len(X), np.nan)
     fold_ics        = []
     last_fold_model = None
+    last_fold_val   = None
 
     for train_start, train_end, val_end in wf_folds:
         val_start = train_end
@@ -452,6 +456,7 @@ def train_global_regression(combined_df: pd.DataFrame, agent: str,
         logger.info("[global_reg/%s] train=%d (embargo %d일) val=%d IC=%.4f",
                     agent, len(tr_idx), emb, len(vl_idx), ic)
         last_fold_model = fold_model  # 마지막 fold 모델 보존 (OOS 검증 완료, train_global()과 동일 관례)
+        last_fold_val   = (X_val, y_val)
 
     if last_fold_model is None:
         raise ValueError(f"[global_reg/{agent}] 유효한 fold가 없습니다 — 데이터/wf_folds를 확인하세요")
@@ -480,7 +485,7 @@ def train_global_regression(combined_df: pd.DataFrame, agent: str,
 
     logger.info("[global_reg/%s] 저장 완료 n=%d IC=%.4f(oof=%.4f)",
                 agent, len(X), last_fold_ic, oof_ic)
-    return last_fold_model, metrics
+    return last_fold_model, metrics, last_fold_val
 
 
 def predict(df: pd.DataFrame, ticker: str, agent: str = "") -> dict:

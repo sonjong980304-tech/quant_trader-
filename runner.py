@@ -561,12 +561,14 @@ def scan_growth_signals_eod():
 
 def scan_kospi200_signals_eod():
     """
-    15:32 실행 — kospi200_xgb 보유 포지션이 0개일 때만(직전 코호트 전량청산 완료) 재학습+스캔한다.
+    15:32 실행 — kospi200_xgb 보유 포지션이 0개일 때만(직전 코호트 전량청산 완료) 스캔한다.
     HOLD=REBAL_FREQ=40거래일(그리드서치로 확정, config.KOSPI200_HOLD)로 코호트가 겹치지 않으므로,
     "슬롯 0개" 조건 하나로 40거래일 주기 리밸런싱을 구현한다(별도 상태 파일 불필요).
 
-    재학습은 reversion처럼 분기 캘린더가 아니라 이 리밸런싱 시점마다(매 40거래일) 직전 호출해
-    최신 데이터까지 포함해 다시 학습한다 — IC가 기존보다 낮으면 자동 롤백(ml/kospi200_trainer.py).
+    재학습은 여기서 하지 않는다 — retrain_kospi200_annual()이 연 1회(매년 1/1) 별도 캘린더로
+    담당한다(2026-07-22 저녁 결정: 처음엔 이 리밸런싱 시점마다 재학습했으나, 백테스트로 재현해보니
+    너무 잦은 재학습이 gross 기준으로도 성과를 깎아먹는 것으로 확인되어 되돌림. README 참조).
+    이 함수는 그 시점에 이미 배포돼 있는 모델(ml/models/_global_kospi200_xgb.pkl)로만 스캔한다.
     """
     if not _check_activation():
         return
@@ -587,27 +589,6 @@ def scan_kospi200_signals_eod():
     # 공용 Circuit Breaker(core.paper_trader.check_circuit_breaker)는 EV/CI/연속손실/AUC 등
     # reversion·trend 자체 실적 기반 지표라 kospi200_xgb와 무관하다(2026-07-22, 사용자 확인).
     # kospi200_xgb는 여기서 이 게이트를 타지 않고, 자체 안전장치(HOLD=40 고정보유+IC 롤백)만 적용.
-
-    # 리밸런싱 시점(포지션 0개) — 스캔 전에 최신 데이터까지 포함해 먼저 재학습.
-    # 실패해도 기존 모델로 스캔은 계속 진행(재학습 오류가 매매 자체를 막지 않게).
-    logger.info("[KOSPI200] 리밸런싱 시점 재학습 시작")
-    try:
-        from ml.kospi200_trainer import retrain_kospi200_global
-        kx_metrics = retrain_kospi200_global()
-        if kx_metrics:
-            tag = "롤백(기존 모델 유지)" if kx_metrics.get("rolled_back") else "신규 모델 채택"
-            old_ic = kx_metrics.get("old_ic")
-            logger.info("[KOSPI200] 재학습 완료 IC=%.4f(기존=%s) — %s",
-                       kx_metrics["ic"], f"{old_ic:.4f}" if old_ic is not None else "없음", tag)
-            send_telegram(
-                f"🤖 <b>KOSPI200 XGB 리밸런싱 재학습 완료</b> — {tag}\n"
-                f"IC={kx_metrics['ic']:.4f}"
-                f"{f' (기존 {old_ic:.4f})' if old_ic is not None else ''}"
-            )
-        else:
-            logger.warning("[KOSPI200] 재학습 실패 — 기존 모델로 스캔 계속")
-    except Exception as e:
-        logger.warning("[KOSPI200] 재학습 오류(기존 모델로 스캔 계속): %s", e)
 
     logger.info("[KOSPI200] 코호트 형성 스캔 시작 (슬롯 0/%d)", KOSPI200_SLOTS)
     try:
@@ -930,6 +911,28 @@ def is_retrain_day(today: date) -> bool:
     return False
 
 
+def is_kospi200_retrain_day(today: date) -> bool:
+    """오늘이 kospi200_xgb 연간 재학습일(매년 1월 1일 또는 직후 첫 영업일)인지 판정.
+    is_retrain_day()와 같은 방식이나 config.KOSPI200_RETRAIN_SCHEDULE(연 1회)을 쓴다 —
+    reversion(분기)과 재학습 주기가 다르므로 별도 스케줄로 분리(2026-07-22)."""
+    from config import KOSPI200_RETRAIN_SCHEDULE
+    mmdd = today.strftime('%m-%d')
+    if mmdd in KOSPI200_RETRAIN_SCHEDULE:
+        return True
+    for s in KOSPI200_RETRAIN_SCHEDULE:
+        m, d = int(s.split('-')[0]), int(s.split('-')[1])
+        try:
+            sched_date = date(today.year, m, d)
+        except ValueError:
+            continue
+        gap = (today - sched_date).days
+        if 1 <= gap <= 7:
+            interim = [sched_date + timedelta(days=i) for i in range(1, gap)]
+            if not any(is_kr_trading_day(d_) for d_ in interim):
+                return True
+    return False
+
+
 def next_retrain_date(from_date=None) -> str:
     """다음 분기 재학습 예정일 (MM-DD 기준 가장 가까운 미래 날짜) 반환."""
     from config import RETRAIN_SCHEDULE
@@ -1071,6 +1074,37 @@ def retrain_kr_models(_is_retry: bool = False):
         send_telegram(f"⚠️ KR ML 재학습 오류: {e}")
 
 
+def retrain_kospi200_annual():
+    """07:31 실행 — kospi200_xgb 연 1회 재학습(매년 1/1 또는 직후 첫 영업일).
+    scan_kospi200_signals_eod()의 40거래일 리밸런싱 스캔과는 독립된 캘린더 스케줄이다
+    (2026-07-22 저녁: 원래 리밸런싱 시점마다 재학습했으나, 백테스트로 재현해보니 너무 잦은
+    재학습이 gross 기준으로도 성과를 깎아먹어 연 1회로 되돌림 — README "재학습 주기 비교" 참조).
+    """
+    today = datetime.now(KST).date()
+    if not is_kr_trading_day(today):
+        return
+    if not is_kospi200_retrain_day(today):
+        return
+    logger.info("[KOSPI200] 연간 재학습일 확인: %s — 재학습 시작", today)
+    try:
+        from ml.kospi200_trainer import retrain_kospi200_global
+        kx_metrics = retrain_kospi200_global()
+        if kx_metrics:
+            tag = "롤백(기존 모델 유지)" if kx_metrics.get("rolled_back") else "신규 모델 채택"
+            old_ic = kx_metrics.get("old_ic_same_period")
+            logger.info("[KOSPI200] 연간 재학습 완료 IC=%.4f(기존 동일구간=%s) — %s",
+                       kx_metrics["ic"], f"{old_ic:.4f}" if old_ic is not None else "없음(최초학습)", tag)
+            send_telegram(
+                f"🤖 <b>KOSPI200 XGB 연간 재학습 완료</b> — {tag}\n"
+                f"IC={kx_metrics['ic']:.4f}"
+                f"{f' (기존 동일구간 {old_ic:.4f})' if old_ic is not None else ''}"
+            )
+        else:
+            logger.warning("[KOSPI200] 연간 재학습 실패 — 기존 모델 유지")
+    except Exception as e:
+        logger.warning("[KOSPI200] 연간 재학습 오류(기존 모델 유지): %s", e)
+
+
 def retrain_us_models(_is_retry: bool = False):
     """미국 증시 시작 직후 실행 — US 유니버스 ML 모델 재학습.
     22:30(서머) / 23:30(동절기) 양쪽에 스케줄 등록 후
@@ -1156,6 +1190,7 @@ def main():
 
     # 고정 스케줄
     schedule.every().day.at("07:30").do(retrain_kr_models)
+    schedule.every().day.at("07:31").do(retrain_kospi200_annual)
     schedule.every().day.at("08:00").do(_run_news_morning)
     schedule.every().day.at("09:00").do(lambda: execute_pending_orders("KR"))  # 한국장 시작
     schedule.every().day.at("09:05").do(lambda: _run_paper_entry_update("KR"))  # KR 시초가 확정
@@ -1191,9 +1226,10 @@ def main():
     )
 
     logger.info(
-        "등록 완료: 07:30 KR재학습(분기별 1/4/7/10월, reversion만) / 08:00 모닝브리핑 / "
+        "등록 완료: 07:30 KR재학습(분기별 1/4/7/10월, reversion만) / "
+        "07:31 kospi200_xgb 연간재학습(매년 1/1) / 08:00 모닝브리핑 / "
         "15:30 KR EOD평가 / 15:31 reversion+trend 스캔 / "
-        "15:32 kospi200_xgb 재학습(슬롯0일때만, 리밸런싱 시점마다)+스캔 / "
+        "15:32 kospi200_xgb 스캔(슬롯0일때만, 40거래일 리밸런싱) / "
         "15:35 KR페이퍼 / 15:40 뉴스브리핑(저녁) / 5분 ML+페이퍼TP/SL / 매월 1일 08:30 리밸런싱"
     )
 
